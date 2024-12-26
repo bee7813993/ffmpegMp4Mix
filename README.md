@@ -15,14 +15,14 @@ By using `ffmpeg`, it ensures that track names are correctly displayed in recent
 ## Download and Installation
 
 ### Download
-1. Download the latest version of this script from the following link:  
-   [ffmpegMp4Mix_latest.zip](https://www.pcgame-r18.jp/owncloud2/index.php/s/tZBdpGmn1BUmwpw/download)
+1. Download the latest version of this script from GitHub release:  
+   [GitHub Link](https://github.com/bee7813993/ffmpegMp4Mix/releases)
 2. Download `ffmpeg` from the official website:  
    [https://ffmpeg.org/download.html](https://ffmpeg.org/download.html)  
    - Extract the downloaded `ffmpeg` files and locate the `ffmpeg.exe` file.
 
 ### Installation
-1. Extract the `ffmpegMp4Mix_latest.zip` to a folder of your choice.
+1. Extract the `ffmpegMp4Mix_XXXXXXXX.zip` to a folder of your choice.
 2. Copy the `ffmpeg.exe` file into the same folder.
 3. Ensure the following files are present:
    ```
