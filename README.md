@@ -11,13 +11,12 @@ By using `ffmpeg`, it ensures that track names are correctly displayed in recent
 
 ## System Requirements
 - Windows 10 or Windows 11 (recommended).
-- `ffmpeg` must be downloaded and placed in the same folder as the script.
 
 ## Download and Installation
 
 ### Download
-1. Download the latest version of this script from GitHub release:  
-   [GitHub Link](https://github.com/bee7813993/ffmpegMp4Mix/releases)
+1. Download the latest version of this script from the following link:  
+   [ffmpegMp4Mix_latest.zip](https://www.pcgame-r18.jp/owncloud2/index.php/s/tZBdpGmn1BUmwpw/download)
 2. Download `ffmpeg` from the official website:  
    [https://ffmpeg.org/download.html](https://ffmpeg.org/download.html)  
    - Extract the downloaded `ffmpeg` files and locate the `ffmpeg.exe` file.
@@ -50,6 +49,12 @@ By using `ffmpeg`, it ensures that track names are correctly displayed in recent
 2. **Select the files**  
    Select all video and audio files, right-click, and choose **Send To → mixtrack_ffmpeg**.
 
+3. **Enter Handling of audio tracks in original video files**  
+   A command prompt will appear, prompting you to enter 0 or 1:  
+   0 :The audio track in the original video file will be the first track in the finished video.  
+   1 :The audio track in the original video file will not be used as the first track of the finished video.
+   - **Press Enter without input** 0 will be selected.
+
 3. **Enter track names**  
    A command prompt will appear, prompting you to enter track names:  
    - **Press Enter without input** to use default track names.
@@ -67,12 +72,14 @@ By using `ffmpeg`, it ensures that track names are correctly displayed in recent
 
 You can customize the behavior of the batch script by editing the following options in `mixtrack_ffmpeg.bat`:
 
-### Include or Exclude Original Video Audio
-- By default, the original video's audio track is not included in the final file.
-- To include it, update the following setting:
+### Use the original video's audio
+- By default, you will be asked whether you want the audio in the video to be the first track of the finished video.
+- By setting USE_VIDEO_AUDIO, you will always be asked without being asked.
   ```bat
   set USE_VIDEO_AUDIO=1
   ```
+- **`0`**: Do not make the video's audio the first track  
+- **`1`**: Make the video's audio the first track  
 
 ### MPC-BE 1.5 Compatibility Mode
 - Prevents duplicate track names in MPC-BE 1.5:
@@ -82,8 +89,7 @@ You can customize the behavior of the batch script by editing the following opti
   - **`0`**: Ensures proper display in MPC-BE 1.6+ and 1.4 or earlier.  
   - **`1`**: Prevents duplicate track names in MPC-BE 1.5.  
   
-  > In compatibility mode, track names will not be displayed in MPC-BE 1.4.  
-
+  > In compatibility mode, track names will not be displayed in MPC-BE 1.4 nor "YUKARI" Version 2017.5.12(This is the latest version as of 2024.)
 
 ### Default Track Names
 - Change the default track names used when no input is provided:
