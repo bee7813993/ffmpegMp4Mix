@@ -1,6 +1,5 @@
 rem mixonoff <Video track> <OnVocal_audio> <offVocal_Audio> 
 @echo off
-setlocal enabledelayedexpansion
 rem chcp 932 for SJIS
 chcp 65001
 
@@ -43,8 +42,10 @@ if "%~x1" == ".mp4" (
 )
 
 rem 展開時にクオートを追加
+setlocal disabledelayedexpansion
 set CMDOPTION1= -i "%VIDEOFILE%"
 set /a ACOUNTER=COUNTER
+setlocal enabledelayedexpansion
 
 rem 動画音声を使用する場合の処理
 if "%USE_VIDEO_AUDIO%"=="1" (
@@ -71,10 +72,13 @@ if "%USE_VIDEO_AUDIO%"=="1" (
 )
 
 :loop
+setlocal disabledelayedexpansion
 rem トラックファイルのパスを処理
 set "TRACKFILE=%~2"
 if "%TRACKFILE%"=="" goto nomalend
 shift
+
+setlocal enabledelayedexpansion
 
 echo ===== ファイル名：!TRACKFILE! =====
 
@@ -113,6 +117,7 @@ if "%MPCBE15_COMPAT_MODE%"=="1" (
     set CMDOPTION2=%CMDOPTION2% -map %ACOUNTER%:a -metadata:s:a:%COUNTER% title="!TRACKNAME!" -metadata:s:a:%COUNTER% handler_name="!TRACKNAME!"
 )
 
+setlocal disabledelayedexpansion
 rem 次の音声トラックを追加
 set CMDOPTION1=%CMDOPTION1% -i "%TRACKFILE%"
 SET /A ACOUNTER+=1
@@ -121,6 +126,7 @@ SET /A COUNTER+=1
 goto loop
 
 :nomalend
+setlocal disabledelayedexpansion
 rem 実行コマンドを出力
 echo %ffmpeg% %CMDOPTION1% -c:v copy -c:a copy %CMDOPTION2% "%filename%"
 %ffmpeg% %CMDOPTION1% -c:v copy -c:a copy %CMDOPTION2% "%filename%"
