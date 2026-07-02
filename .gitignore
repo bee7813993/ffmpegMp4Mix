@@ -1,0 +1,4 @@
+tools/ffmpeg.exe
+tools/ffplay.exe
+tools/ffprobe.exe
+dist/
