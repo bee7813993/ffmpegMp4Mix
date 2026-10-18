@@ -508,3 +508,7 @@ This creates `dist\PitaTrack_vX.Y.Z.zip`.
 - Only files tracked by git are included (the `dev` folder and `ffmpeg.exe` are not). Run `git add` for new files first.
 - To change the ffmpeg version that is downloaded, change `$Script:FfmpegUrl` and `$Script:FfmpegSha256` in `tools\setup.ps1` together.
 - The icon is `tools\pitatrack.ico`. If you replace it, the next installation (or `tools\makesendto` run) uses it for `PitaTrack.exe`, the shortcuts, and the windows.
+
+## The ffmpeg Bundled with the Store Version (for Developers)
+
+The `ffmpeg.exe` bundled with the Store (MSIX) version is built from the official FFmpeg source with LGPL components only (the "FFmpeg LGPL build" GitHub Actions workflow). See [dev/ffmpeg-lgpl/README.md](dev/ffmpeg-lgpl/README.md) (in Japanese) for how it is built, tested, and published to GitHub Releases, and for the license notice drafts.

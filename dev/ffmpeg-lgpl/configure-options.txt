@@ -1,0 +1,37 @@
+# ぴたトラックに同梱する ffmpeg.exe の configure の指定。
+# build.sh が、クロスコンパイルの指定（--target-os=mingw32 --arch=x86_64 など）に続けて
+# 1 行に 1 つずつ渡します（# から行末まではコメント）。
+#
+# ライセンス: LGPL version 2.1 以降だけ。
+# --enable-gpl、--enable-nonfree、--enable-version3 は付けず、外部のライブラリも使わない。
+
+# ---- 何もない状態から始める ----
+--disable-everything
+# ビルドする PC にあるもの（zlib、iconv、schannel など）を勝手に使わない
+--disable-autodetect
+# --disable-autodetect は ffmpeg.exe に必要な Windows のスレッドも切るので、戻す
+--enable-w32threads
+--disable-programs
+--enable-ffmpeg
+--disable-avdevice
+--disable-swscale
+--disable-network
+--disable-doc
+
+# ---- 読む: 動画（.mp4）と音声ファイル（.mp4 .m4a .aac .mp3 .wav .flac .ogg） ----
+--enable-protocol=file,pipe
+--enable-demuxer=mov,aac,mp3,wav,flac,ogg
+# aac、mpegaudio、flac: .aac .mp3 .flac をコピーするときにフレームに分ける。
+# h264、hevc: 映像をコピーするとき、mov のデマルチプレクサーが H.264 の情報（フィールドの順など）を読む。
+--enable-parser=aac,mpegaudio,flac,vorbis,opus,h264,hevc
+--enable-decoder=aac,mp3float,mp3,vorbis,opus,flac,alac
+--enable-decoder=pcm_u8,pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_s32be,pcm_f32le,pcm_f32be,pcm_f64le,pcm_f64be
+
+# ---- 書く: まとめた .mp4 と、自動調整のために標準出力へ出す f32le ----
+# "-f f32le" は pcm_f32le のマルチプレクサー。mp4 を入れると mov も入る。
+--enable-muxer=mp4,pcm_f32le
+--enable-encoder=aac,pcm_f32le
+--enable-bsf=aac_adtstoasc
+# adelay: 再エンコードするトラックを遅らせる。aresample: -ar、-ac とサンプル形式の変換。
+# ほかに ffmpeg.exe 自身が aformat、anull、atrim といくつかの映像のフィルターを入れる。
+--enable-filter=adelay,aresample

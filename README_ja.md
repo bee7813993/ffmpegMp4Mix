@@ -508,3 +508,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File dev\build_release.ps1
 - gitで管理しているファイルだけを入れます（`dev` フォルダーと `ffmpeg.exe` は入りません）。新しく追加したファイルは、先に `git add` してください。
 - ダウンロードする ffmpeg の版を変えるときは、`tools\setup.ps1` の `$Script:FfmpegUrl` と `$Script:FfmpegSha256` を一緒に変えます。
 - アイコンは `tools\pitatrack.ico` です。差し替えると、次のインストール（または `tools\makesendto` の実行）から、`PitaTrack.exe`・ショートカット・画面のアイコンに反映されます。
+
+## Store 版に同梱する ffmpeg（開発者向け）
+
+Store 版（MSIX）に同梱する `ffmpeg.exe` は、FFmpeg 公式のソースから LGPL の部品だけでビルドします（GitHub Actions の「FFmpeg LGPL build」）。作り方、確かめ方、GitHub Release への置き方、ライセンス表示の文案は [dev/ffmpeg-lgpl/README.md](dev/ffmpeg-lgpl/README.md) にあります。
