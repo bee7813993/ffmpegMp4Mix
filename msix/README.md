@@ -9,6 +9,7 @@
 | `AppxManifest.xml` | マニフェストのひな形。`__IDENTITY_NAME__` などは `dev\build_msix.ps1` が埋める |
 | `PitaTrackShell\` | エクスプローラーの右クリックに「ぴたトラックでまとめる」「ぴたトラック (CLI版) でまとめる」を出す DLL（IExplorerCommand、C++） |
 | `..\tools\PitaTrackLauncher.cs` | 起動用の `PitaTrack.exe`。ZIP 版の setup.ps1 と共通 |
+| `store-submission.md` | Microsoft Store への提出の手順と、各欄に書く内容の案 |
 | `licenses-README.txt` | アプリの「設定 → ライセンス」で見せる文面のひな形。パッケージの `licenses\README.txt` になる |
 | `..\dev\build_msix.ps1` | パッケージを作るスクリプト |
 
@@ -35,6 +36,8 @@ ffmpeg は、`dev\ffmpeg-lgpl` でビルドした LGPL 版の GitHub Release（�
 - 「送る」には登録しません。右クリックメニューで代わりにします。ファイルの種類の動詞（uap3:Verb）は、ぴたトラックを既定のアプリにしないと右クリックに出ないため使っていません。
 
 ## Store に出す前に残っていること
+
+提出の手順と、各欄に書く内容の案は [store-submission.md](store-submission.md) にまとめています。
 
 - Partner Center でアプリ名を予約し、`-IdentityName`、`-Publisher`、`-PublisherDisplayName` をその値にする。
 - Store の掲載情報の「追加のライセンス条項」と説明文に、FFmpeg を LGPLv2.1 で使っていることとソースの場所を書く（文案は `dev\ffmpeg-lgpl\license-notice.md` の 2 と 3）。
