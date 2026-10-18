@@ -1741,6 +1741,66 @@ function Invoke-Ffmpeg {
     return $true
 }
 
+# ライセンスの表示。Store 版は dev\build_msix.ps1 が入れる licenses\README.txt を見せる
+function Show-LicenseDialog {
+    param([System.Windows.Forms.IWin32Window]$Owner)
+
+    $licenseDir = Join-Path $Script:RootDir 'licenses'
+    $readmePath = Join-Path $licenseDir 'README.txt'
+    if (Test-Path -LiteralPath $readmePath -PathType Leaf) {
+        $text = Get-Content -LiteralPath $readmePath -Raw -Encoding UTF8
+        $folder = $licenseDir
+    }
+    else {
+        $text = "ぴたトラックは Apache License 2.0 で提供しています。`r`n" +
+            (Join-Path $Script:RootDir 'LICENSE') + "`r`n`r`n" +
+            "動画と音声をまとめるのに使う ffmpeg.exe は、FFmpeg プロジェクト（https://ffmpeg.org/）のソフトウェアです。`r`n" +
+            "ぴたトラックの作者は FFmpeg の著作権を持っていません。"
+        $folder = $Script:RootDir
+    }
+
+    $dialog = New-Object System.Windows.Forms.Form
+    $dialog.Text = 'ライセンス'
+    $dialog.StartPosition = 'CenterParent'
+    $dialog.Size = New-Object System.Drawing.Size(640, 480)
+    $dialog.MinimumSize = New-Object System.Drawing.Size(480, 320)
+    Set-FormTheme -Form $dialog
+
+    $textBox = New-Object System.Windows.Forms.TextBox
+    $textBox.Multiline = $true
+    $textBox.ReadOnly = $true
+    $textBox.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
+    $textBox.Location = New-Object System.Drawing.Point(12, 12)
+    $textBox.Size = New-Object System.Drawing.Size(600, 380)
+    $textBox.Anchor = 'Left,Right,Top,Bottom'
+    $textBox.Text = ($text -replace "`r?`n", "`r`n")
+    Set-TextBoxTheme -TextBox $textBox
+
+    $folderButton = New-Object System.Windows.Forms.Button
+    $folderButton.Text = 'フォルダーを開く'
+    $folderButton.Location = New-Object System.Drawing.Point(12, 402)
+    $folderButton.Size = New-Object System.Drawing.Size(130, 30)
+    $folderButton.Anchor = 'Left,Bottom'
+    Set-ButtonTheme -Button $folderButton
+    $folderButton.Add_Click({
+        Start-Process -FilePath (Join-Path $env:SystemRoot 'explorer.exe') -ArgumentList (ConvertTo-CommandLineArgument $folder)
+    })
+
+    $closeButton = New-Object System.Windows.Forms.Button
+    $closeButton.Text = '閉じる'
+    $closeButton.Location = New-Object System.Drawing.Point(528, 402)
+    $closeButton.Size = New-Object System.Drawing.Size(84, 30)
+    $closeButton.Anchor = 'Right,Bottom'
+    $closeButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    Set-ButtonTheme -Button $closeButton -Kind Primary
+
+    $dialog.AcceptButton = $closeButton
+    $dialog.CancelButton = $closeButton
+    $dialog.Controls.AddRange(@($textBox, $folderButton, $closeButton))
+    $dialog.Add_Shown({ $closeButton.Focus() | Out-Null })
+    [void]$dialog.ShowDialog($Owner)
+}
+
 function Show-SettingsDialog {
     param([object]$CurrentSettings)
 
@@ -1964,6 +2024,15 @@ function Show-SettingsDialog {
     $cancelButton.TabIndex = 13
     $cancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     Set-ButtonTheme -Button $cancelButton
+
+    $licenseButton = New-Object System.Windows.Forms.Button
+    $licenseButton.Text = 'ライセンス'
+    $licenseButton.Location = New-Object System.Drawing.Point(12, 586)
+    $licenseButton.Size = New-Object System.Drawing.Size(100, 30)
+    $licenseButton.Anchor = 'Left,Bottom'
+    $licenseButton.TabIndex = 14
+    Set-ButtonTheme -Button $licenseButton
+    $licenseButton.Add_Click({ Show-LicenseDialog -Owner $dialog })
 
     function Get-ProfileItemText {
         param([int]$Count)
@@ -2221,7 +2290,7 @@ function Show-SettingsDialog {
         $grid, $addButton, $deleteButton, $suffixLabel, $suffixText, $separator,
         $candidateLabel, $candidateText, $laterLabel, $laterText,
         $delayModeLabel, $delayModeCombo, $bitrateLabel, $bitrateText,
-        $offsetStepLabel, $offsetStepText, $autoOffsetCheck, $okButton, $cancelButton
+        $offsetStepLabel, $offsetStepText, $autoOffsetCheck, $okButton, $cancelButton, $licenseButton
     ))
 
     $editor.Suppress = $true

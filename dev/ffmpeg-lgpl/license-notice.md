@@ -65,17 +65,19 @@ This software uses code of FFmpeg licensed under the LGPLv2.1 and its source can
 
 | パッケージの中 | 元 |
 |---|---|
-| `tools\ffmpeg.exe` | artifact `ffmpeg-9.0.2-pitatrack1-lgpl-win64` の `ffmpeg.exe`（`dev\build_msix.ps1 -FfmpegPath`） |
+| `tools\ffmpeg.exe` | Release の `ffmpeg-9.0.2-pitatrack1-lgpl-win64.zip` の `ffmpeg.exe` |
 | `licenses\FFmpeg\LICENSE.txt` | 同じ artifact の `LICENSE.txt`（LGPL 2.1 の全文） |
 | `licenses\FFmpeg\FFmpeg-LICENSE.md` | 同じ artifact の `FFmpeg-LICENSE.md` |
 | `licenses\FFmpeg\README.txt` | 同じ artifact の `README.txt`（ソースの場所） |
 | `licenses\FFmpeg\BUILD.txt` | 同じ artifact の `BUILD.txt`（configure の指定とビルド環境） |
 | `licenses\FFmpeg\mingw-w64-runtime-copyright.txt` | 同じ artifact の `mingw-w64-runtime-copyright.txt`（静的にリンクした mingw-w64 のランタイム） |
 | `licenses\PitaTrack\LICENSE` | リポジトリの `LICENSE`（Apache 2.0） |
+| `licenses\FFmpeg\source\` | Release の `ffmpeg-9.0.2.tar.xz`、`ffmpeg-9.0.2.tar.xz.asc`、`ffmpeg-9.0.2-pitatrack1-build-files.zip`（下の案 A） |
+| `licenses\README.txt` | `msix\licenses-README.txt`（1 の文面。アプリの「設定 → ライセンス」で表示する） |
 
-`dev\build_msix.ps1` は今のところ `ffmpeg.exe` だけをコピーします。上のライセンスのファイルも入れるよう、`-FfmpegPath` と同じフォルダーにある `LICENSE.txt` などを `licenses\FFmpeg\` にコピーする処理を足します（PR #5 の側の作業）。
+`dev\build_msix.ps1` が、Release からこれらをダウンロードし、スクリプトに書いた SHA256 と照らし合わせてから入れます。zip の中の `SHA256SUMS.txt` と `configure-options.txt` も `licenses\FFmpeg\` に入ります。
 
-### ソースをパッケージにも入れるか（決めること）
+### ソースをパッケージにも入れるか（案 A にした）
 
 LGPL 2.1 の第 4 節は、FFmpeg を実行形式で配るとき、対応するソースを「一緒に付ける」か、実行形式と「同じ場所」からソースを取れるようにすることを求めています。FFmpeg のチェックリストの 8 番も、ソースを実行形式と同じサーバーに置くよう勧めています。Store 版の実行形式は Microsoft のサーバーから配られるので、GitHub Release のソースは厳密には「同じ場所」ではありません。
 
@@ -84,18 +86,20 @@ LGPL 2.1 の第 4 節は、FFmpeg を実行形式で配るとき、対応する�
 
 どちらの場合も、GitHub Release にはソースを置き、表示の URL はそこを指します。
 
+2026-10-19 に**案 A** にしました（`dev\build_msix.ps1` がソースを `licenses\FFmpeg\source\` に入れる）。パッケージはソースの分だけ大きくなりますが、条件を文字どおりに満たします。
+
 ## 5. FFmpeg のチェックリストへの対応
 
 | # | チェックリストの項目（要約） | 対応 |
 |---|---|---|
 | 1 | `--enable-gpl` と `--enable-nonfree` を付けない | 付けていない。`--enable-version3` も付けず、外部のライブラリも使わない。CI の `-buildconf` と `-L` の確認で毎回見る |
 | 2 | FFmpeg のライブラリには動的にリンクする（Windows では DLL） | ぴたトラックは FFmpeg のライブラリにリンクせず、`ffmpeg.exe` を別のプロセスとして呼ぶだけ。`ffmpeg.exe` の中で FFmpeg のライブラリを静的にリンクしているのは FFmpeg 自身で、ぴたトラックの側のリンクではない |
-| 3 | 改変の有無にかかわらず FFmpeg のソースを配る | GitHub Release に公式の tarball を置く（案 A ならパッケージにも入れる） |
+| 3 | 改変の有無にかかわらず FFmpeg のソースを配る | GitHub Release に公式の tarball を置き、Store 版はパッケージにも入れる（案 A） |
 | 4 | ソースが配る実行形式と正確に対応している | 同じタグのワークフローで、SHA256 と署名を確かめた tarball からビルドし、その tarball をそのまま置く |
 | 5 | 改変を `changes.diff` にまとめる | 改変していない（パッチなし）。`BUILD.txt` にその旨を書いている |
 | 6 | どうビルドしたか（configure の指定など）をテキストファイルで添える | `BUILD.txt`（configure の全体、ツールチェーンの版）と `configure-options.txt` を、バイナリの zip と build-files.zip の両方に入れる |
 | 7 | ソースは tarball か zip で配る | 公式の `ffmpeg-9.0.2.tar.xz` をそのまま置く |
-| 8 | ソースを実行形式と同じサーバーに置く | Store 版は満たせない（上の「ソースをパッケージにも入れるか」）。ZIP 版などを GitHub Release で配るときは同じ Release に置ける |
+| 8 | ソースを実行形式と同じサーバーに置く | Store 版はソースをパッケージに入れて、実行形式と一緒に届ける（案 A）。ZIP 版などを GitHub Release で配るときは同じ Release に置ける |
 | 9 | ダウンロードのリンクがあるページに、LGPLv2.1 の FFmpeg を使っていることとソースの場所を書く | 3 の文案 |
 | 10 | About に LGPLv2.1 の FFmpeg を使っていると書く | 1 の文案 |
 | 11 | 使用許諾（EULA）に LGPLv2.1 の FFmpeg を使っていると書く | 2 の文案 |

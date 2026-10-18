@@ -1,8 +1,5 @@
 ﻿[CmdletBinding()]
 param(
-    # パッケージに入れる ffmpeg.exe。Store に出すときは、ソースを公開した LGPL ビルドにする
-    [Parameter(Mandatory = $true)]
-    [string]$FfmpegPath,
     # Store に出すときは Partner Center の「製品 ID」の値にする
     [string]$IdentityName = 'PitaTrack.Dev',
     [string]$Publisher = 'CN=PitaTrackDev',
@@ -16,7 +13,11 @@ param(
 #   - 版は tools\setup.ps1 の $Script:AppVersion から読み取ります（4 つ目は 0。Store が使うため）。
 #   - 起動用の PitaTrack.exe（tools\PitaTrackLauncher.cs）を .NET Framework の csc でビルドします。
 #   - 右クリックメニューの PitaTrackShell.dll（msix\PitaTrackShell）を Visual Studio の C++ でビルドします。
-#   - setup.ps1 などのインストール用ファイルは入れません（ffmpeg のダウンロードもしない）。
+#   - ffmpeg は、dev\ffmpeg-lgpl でビルドした LGPL 版の GitHub Release（下の $ffmpegRelease）からダウンロードし、
+#     SHA256 を確かめて tools\ffmpeg.exe に入れます。ライセンスの文書とソース（tar.xz）も licenses\FFmpeg に入れます
+#     （LGPL 2.1 の第 4 節。ソースを実行形式と一緒に届けるため）。ダウンロードしたものは dist\ffmpeg-cache に残します。
+#   - アプリの「設定 → ライセンス」で見せる licenses\README.txt は msix\licenses-README.txt から作ります。
+#   - setup.ps1 などのインストール用ファイルは入れません（アプリが ffmpeg をダウンロードすることもない）。
 #   - パッケージは署名しません。Store に出すと Microsoft が署名します。
 #     この PC で試すときは -Register を付け、署名なしのフォルダー（dist\msix-layout）をそのまま登録します。
 #     右クリックメニューは、登録したあとエクスプローラーを再起動すると出ます。
@@ -28,9 +29,20 @@ $repoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 if ([string]::IsNullOrWhiteSpace($OutputDir)) {
     $OutputDir = Join-Path $repoRoot 'dist'
 }
-if (-not (Test-Path -LiteralPath $FfmpegPath -PathType Leaf)) {
-    throw ('ffmpeg.exe が見つかりません: ' + $FfmpegPath)
+
+# 同梱する ffmpeg（dev\ffmpeg-lgpl でビルドした LGPL 版。GitHub Release の ffmpeg-<版>-pitatrack<番号>）。
+# 版を上げるときは、新しい Release の SHA256SUMS.txt の値で下を一緒に変えます
+# （ZIP 版は tools\setup.ps1 の $Script:FfmpegUrl と $Script:FfmpegSha256）。
+$ffmpegVersion = '9.0.2'
+$ffmpegRelease = 'ffmpeg-9.0.2-pitatrack1'
+$ffmpegFiles = [ordered]@{
+    'ffmpeg-9.0.2-pitatrack1-lgpl-win64.zip'  = '34e93b6949d16ac109b15abf93826fc5f4af6fdf51a8d469a16eadec49d90eae'
+    'ffmpeg-9.0.2-pitatrack1-build-files.zip' = '3aa32fcac067acffbd7170b09148086b20b59fe796cab4225bcd11b9b643c5c3'
+    'ffmpeg-9.0.2.tar.xz'                     = '8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e'
+    'ffmpeg-9.0.2.tar.xz.asc'                 = 'd617fd94ea354dadd2a8bb16243d37c44e1e9729b06b6ad58fe30bfb0fa943f2'
 }
+$ffmpegReleaseUrl = 'https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/' + $ffmpegRelease
+$ffmpegDownloadUrl = 'https://github.com/bee7813993/ffmpegMp4Mix/releases/download/' + $ffmpegRelease + '/'
 
 $setupText = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\setup.ps1') -Raw -Encoding UTF8
 if ($setupText -notmatch '\$Script:AppVersion\s*=\s*''(\d+)\.(\d+)\.(\d+)''') {
@@ -85,16 +97,55 @@ foreach ($directory in @($layout, $objDir)) {
     }
     New-Item -ItemType Directory -Path $directory -Force | Out-Null
 }
-New-Item -ItemType Directory -Path (Join-Path $layout 'tools'), (Join-Path $layout 'Assets') -Force | Out-Null
+$licenseDir = Join-Path $layout 'licenses'
+$ffmpegLicenseDir = Join-Path $licenseDir 'FFmpeg'
+$ffmpegSourceDir = Join-Path $ffmpegLicenseDir 'source'
+New-Item -ItemType Directory -Path (Join-Path $layout 'tools'), (Join-Path $layout 'Assets'), (Join-Path $licenseDir 'PitaTrack'), $ffmpegSourceDir -Force | Out-Null
 
-# ---- アプリのファイル ----
+# ---- ffmpeg（LGPL 版の Release をダウンロードし、SHA256 を確かめる） ----
+
+$ffmpegCache = Join-Path $OutputDir (Join-Path 'ffmpeg-cache' $ffmpegRelease)
+New-Item -ItemType Directory -Path $ffmpegCache -Force | Out-Null
+$ProgressPreference = 'SilentlyContinue'
+[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
+foreach ($name in $ffmpegFiles.Keys) {
+    $path = Join-Path $ffmpegCache $name
+    if (-not (Test-Path -LiteralPath $path)) {
+        Write-Host ('ダウンロード: ' + $ffmpegDownloadUrl + $name)
+        Invoke-WebRequest -Uri ($ffmpegDownloadUrl + $name) -OutFile ($path + '.part') -UseBasicParsing
+        Move-Item -LiteralPath ($path + '.part') -Destination $path -Force
+    }
+    $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+    if ($hash -ne $ffmpegFiles[$name]) {
+        Remove-Item -LiteralPath $path -Force
+        throw ($name + ' の SHA256 が一致しません（' + $hash + '）。もう一度実行するとダウンロードし直します。')
+    }
+}
+
+# バイナリの zip: ffmpeg.exe は tools に、ほかのファイル（LICENSE.txt、BUILD.txt など）は licenses\FFmpeg に
+$ffmpegExtract = Join-Path $objDir 'ffmpeg'
+Expand-Archive -LiteralPath (Join-Path $ffmpegCache ($ffmpegRelease + '-lgpl-win64.zip')) -DestinationPath $ffmpegExtract -Force
+$ffmpegExe = Get-ChildItem -LiteralPath $ffmpegExtract -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+if ($null -eq $ffmpegExe) {
+    throw 'ダウンロードした zip に ffmpeg.exe が入っていません。'
+}
+Copy-Item -LiteralPath $ffmpegExe.FullName -Destination (Join-Path $layout 'tools\ffmpeg.exe')
+Get-ChildItem -LiteralPath $ffmpegExe.DirectoryName -File | Where-Object { $_.Name -ne 'ffmpeg.exe' } | Copy-Item -Destination $ffmpegLicenseDir
+foreach ($name in $ffmpegFiles.Keys) {
+    if ($name -notlike '*-lgpl-win64.zip') {
+        Copy-Item -LiteralPath (Join-Path $ffmpegCache $name) -Destination $ffmpegSourceDir
+    }
+}
+
+# ---- アプリのファイルとライセンス ----
 
 Copy-Item -LiteralPath (Join-Path $repoRoot 'mixtrack_ffmpeg.bat') -Destination $layout
-Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE') -Destination $layout
+Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE') -Destination (Join-Path $licenseDir 'PitaTrack')
 foreach ($name in @('mixtrack_ffmpeg_gui.ps1', 'mixtrack_ffmpeg_gui.settings.json', 'pitatrack.ico')) {
     Copy-Item -LiteralPath (Join-Path $repoRoot (Join-Path 'tools' $name)) -Destination (Join-Path $layout 'tools')
 }
-Copy-Item -LiteralPath $FfmpegPath -Destination (Join-Path $layout 'tools\ffmpeg.exe')
+$licenseText = (Get-Content -LiteralPath (Join-Path $repoRoot 'msix\licenses-README.txt') -Raw -Encoding UTF8).Replace('__FFMPEG_VERSION__', $ffmpegVersion).Replace('__FFMPEG_RELEASE_URL__', $ffmpegReleaseUrl)
+[System.IO.File]::WriteAllText((Join-Path $licenseDir 'README.txt'), $licenseText, (New-Object System.Text.UTF8Encoding $true))
 
 # ---- PitaTrack.exe ----
 
@@ -107,7 +158,7 @@ if ($LASTEXITCODE -ne 0) {
 # ---- PitaTrackShell.dll（右クリックメニュー） ----
 
 $shellSource = Join-Path $repoRoot 'msix\PitaTrackShell'
-$clCommand = 'call "{0}" >nul 2>&1 && cl/nologo /LD /EHsc /O2 /W4 /utf-8 /MT /DUNICODE /D_UNICODE /Fo"{1}\\" "{2}\PitaTrackShell.cpp" /link /DEF:"{2}\PitaTrackShell.def" /OUT:"{3}\PitaTrackShell.dll" /IMPLIB:"{1}\PitaTrackShell.lib" shlwapi.lib shell32.lib ole32.lib user32.lib' -f $vcvars, $objDir, $shellSource, $layout
+$clCommand = 'call "{0}" >nul 2>&1 && cl /nologo/LD /EHsc /O2 /W4 /utf-8 /MT /DUNICODE /D_UNICODE /Fo"{1}\\" "{2}\PitaTrackShell.cpp" /link /DEF:"{2}\PitaTrackShell.def" /OUT:"{3}\PitaTrackShell.dll" /IMPLIB:"{1}\PitaTrackShell.lib" shlwapi.lib shell32.lib ole32.lib user32.lib' -f $vcvars, $objDir, $shellSource, $layout
 cmd /c $clCommand
 if ($LASTEXITCODE -ne 0) {
     throw 'PitaTrackShell.dll をビルドできませんでした。'
