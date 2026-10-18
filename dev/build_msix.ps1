@@ -1,12 +1,15 @@
 ﻿[CmdletBinding()]
 param(
-    # Store に出すときは Partner Center の「製品 ID」の値にする
-    [string]$IdentityName = 'PitaTrack.Dev',
-    [string]$Publisher = 'CN=PitaTrackDev',
-    [string]$PublisherDisplayName = 'bee7813993',
+    # 既定は Partner Center の「製品 ID」の値（ぴたトラック）
+    [string]$IdentityName = 'YFRTeam.36059D6F4B72A',
+    [string]$Publisher = 'CN=7F20441E-C8F2-4A45-B847-6FECA63733DB',
+    [string]$PublisherDisplayName = 'YFRTeam',
     [string]$OutputDir,
     # 作ったフォルダーをこの PC に登録して試す（Windows の開発者モードが必要）
-    [switch]$Register
+    [switch]$Register,
+    # 試験用の ID（PitaTrack.Dev）で作る。この PC に -Register して試すときに付ける。
+    # Store の ID のまま登録すると、同じ PC に Store から入れるときにぶつかるため
+    [switch]$DevIdentity
 )
 
 # Store 版（MSIX）のパッケージ dist\PitaTrack_<版>_x64.msix を作ります。
@@ -19,7 +22,7 @@ param(
 #   - アプリの「設定 → ライセンス」で見せる licenses\README.txt は msix\licenses-README.txt から作ります。
 #   - setup.ps1 などのインストール用ファイルは入れません（アプリが ffmpeg をダウンロードすることもない）。
 #   - パッケージは署名しません。Store に出すと Microsoft が署名します。
-#     この PC で試すときは -Register を付け、署名なしのフォルダー（dist\msix-layout）をそのまま登録します。
+#     この PC で試すときは -Register -DevIdentity を付け、署名なしのフォルダー（dist\msix-layout）を試験用の ID でそのまま登録します。
 #     右クリックメニューは、登録したあとエクスプローラーを再起動すると出ます。
 # 必要なもの: Visual Studio（C++ によるデスクトップ開発）と Windows SDK（makeappx.exe）
 
@@ -28,6 +31,13 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 if ([string]::IsNullOrWhiteSpace($OutputDir)) {
     $OutputDir = Join-Path $repoRoot 'dist'
+}
+if ($DevIdentity) {
+    $IdentityName = 'PitaTrack.Dev'
+    $Publisher = 'CN=PitaTrackDev'
+}
+elseif ($Register) {
+    Write-Warning ('Store の ID（' + $IdentityName + '）のまま登録します。この PC に Store から入れる前に外してください。試すだけなら -DevIdentity を付けてください。')
 }
 
 # 同梱する ffmpeg（dev\ffmpeg-lgpl でビルドした LGPL 版。GitHub Release の ffmpeg-<版>-pitatrack<番号>）。
@@ -158,7 +168,7 @@ if ($LASTEXITCODE -ne 0) {
 # ---- PitaTrackShell.dll（右クリックメニュー） ----
 
 $shellSource = Join-Path $repoRoot 'msix\PitaTrackShell'
-$clCommand = 'call "{0}" >nul 2>&1 && cl /nologo/LD /EHsc /O2 /W4 /utf-8 /MT /DUNICODE /D_UNICODE /Fo"{1}\\" "{2}\PitaTrackShell.cpp" /link /DEF:"{2}\PitaTrackShell.def" /OUT:"{3}\PitaTrackShell.dll" /IMPLIB:"{1}\PitaTrackShell.lib" shlwapi.lib shell32.lib ole32.lib user32.lib' -f $vcvars, $objDir, $shellSource, $layout
+$clCommand = 'call "{0}" >nul 2>&1 && cl /nologo /LD /EHsc /O2 /W4 /utf-8 /MT /DUNICODE /D_UNICODE /Fo"{1}\\" "{2}\PitaTrackShell.cpp" /link /DEF:"{2}\PitaTrackShell.def" /OUT:"{3}\PitaTrackShell.dll" /IMPLIB:"{1}\PitaTrackShell.lib" shlwapi.lib shell32.lib ole32.lib user32.lib' -f $vcvars, $objDir, $shellSource, $layout
 cmd /c $clCommand
 if ($LASTEXITCODE -ne 0) {
     throw 'PitaTrackShell.dll をビルドできませんでした。'

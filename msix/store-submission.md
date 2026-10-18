@@ -8,16 +8,17 @@
 
 ## 1. 事前準備（1 回だけ）
 
-1. Partner Center（https://partner.microsoft.com/dashboard）で、アプリの名前「ぴたトラック」を予約します。英語の名前も使うなら「PitaTrack」も予約します。
-2. 「製品の管理 → 製品 ID（Product identity）」で、次の 3 つの値を確かめます。
+1. Partner Center（https://partner.microsoft.com/dashboard）で「新しい製品」を作り、アプリの名前「ぴたトラック」を予約します（2026-10-19 に予約済み）。
+   - 英語の名前「PitaTrack」も使うときは、製品を増やさず、同じ製品の「製品の管理 → アプリ名の管理（Manage app names）」の「その他の名前を予約（Reserve more names）」で予約します。1 つの製品に名前を複数予約でき、言語ごとの掲載情報で使う名前を選べます。
+   - インストールしたあとの表示名は、パッケージのマニフェストの名前（今は「ぴたトラック」だけ）です。英語の Windows で「PitaTrack」と出したいときは、マニフェストに英語の表示名を足す変更が別に要ります。
+2. 「製品の管理 → 製品 ID（Product identity）」の 3 つの値は、`dev\build_msix.ps1` の既定値に入れてあります。
 
-   | 値 | build_msix.ps1 の引数 |
-   |---|---|
-   | `Package/Identity/Name` | `-IdentityName` |
-   | `Package/Identity/Publisher`（`CN=…`） | `-Publisher` |
-   | `Package/Properties/PublisherDisplayName` | `-PublisherDisplayName` |
+   | 値 | ぴたトラックの値 | build_msix.ps1 の引数 |
+   |---|---|---|
+   | `Package/Identity/Name` | `YFRTeam.36059D6F4B72A` | `-IdentityName` |
+   | `Package/Identity/Publisher` | `CN=7F20441E-C8F2-4A45-B847-6FECA63733DB` | `-Publisher` |
+   | `Package/Properties/PublisherDisplayName` | `YFRTeam` | `-PublisherDisplayName` |
 
-   値を確かめたら、`dev\build_msix.ps1` の引数の既定値（今は試験用の `PitaTrack.Dev` など）をこの値に変えておくと、毎回指定せずに済みます。
 3. スクリーンショットを用意します（PNG、1366×768 以上。1 枚以上が必須で、4 枚以上が推奨）。おすすめは次の 4 枚です。
    - GUI の画面（動画と音声トラックを入れた状態。`docs\images\gui-main.png` のような画面）
    - 右クリックメニュー（「ぴたトラックでまとめる」「ぴたトラック (CLI版) でまとめる」が見える状態）
@@ -29,13 +30,13 @@
 ビルドする PC に必要なもの: Visual Studio（C++ によるデスクトップ開発）、Windows SDK（makeappx.exe）
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File dev\build_msix.ps1 -IdentityName <Name> -Publisher "<Publisher>" -PublisherDisplayName "<PublisherDisplayName>"
+powershell -NoProfile -ExecutionPolicy Bypass -File dev\build_msix.ps1
 ```
 
 - `dist\PitaTrack_<版>_x64.msix` ができます。署名は不要です（Store が署名します）。
 - 版は `tools\setup.ps1` の `$Script:AppVersion`（例: 2.1.0 → 2.1.0.0）です。**提出するたびに、前に出したものより大きい版が必要**なので、更新のときは `$Script:AppVersion` を上げます（ZIP 版の版も一緒に上がります）。
 - 同梱の ffmpeg は、`build_msix.ps1` に書いた LGPL 版の Release（今は `ffmpeg-9.0.2-pitatrack1`）です。ffmpeg の版を上げたときは、下の「追加のライセンス条項」の URL も変えます。
-- 手元での確認（任意）: 開発者モードで `-Register` を付けて登録し、右クリック、GUI、CLI、「設定 → ライセンス」を試します。そのあと `Get-AppxPackage <Name> | Remove-AppxPackage` で外します。
+- 手元での確認（任意）: 開発者モードで `-Register -DevIdentity` を付けて登録し、右クリック、GUI、CLI、「設定 → ライセンス」を試します。そのあと `Get-AppxPackage PitaTrack.Dev | Remove-AppxPackage` で外します。`-DevIdentity` を付けずに `-Register` すると Store の ID で登録され、同じ PC に Store から入れるときにぶつかります。
 
 ## 3. 提出（Partner Center の「提出の開始」）
 

@@ -25,7 +25,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File dev\build_msix.ps1
 
 ffmpeg は、`dev\ffmpeg-lgpl` でビルドした LGPL 版の GitHub Release（今は `ffmpeg-9.0.2-pitatrack1`）からダウンロードし、`build_msix.ps1` に書いた SHA256 と照らし合わせます。ダウンロードしたものは `dist\ffmpeg-cache` に残すので、2 回目からはダウンロードしません。ffmpeg の版を上げるときは、新しい Release を作ってから、`build_msix.ps1` の `$ffmpegVersion`、`$ffmpegRelease`、`$ffmpegFiles` を変えます。
 
-この PC で試すときは、Windows の開発者モードをオンにして `-Register` を付けます。署名なしのフォルダー `dist\msix-layout` がそのまま登録されます。右クリックメニューは、エクスプローラーを再起動すると出ます。外すときは `Get-AppxPackage PitaTrack.Dev | Remove-AppxPackage` を実行します。
+パッケージの ID（Name、Publisher、PublisherDisplayName）は、既定で Partner Center の製品 ID の値（ぴたトラック）になります。右クリックメニューは、エクスプローラーを再起動すると出ます。外すときは `Get-AppxPackage PitaTrack.Dev | Remove-AppxPackage` を実行します。
 
 ## Store 版の動き
 
@@ -39,7 +39,6 @@ ffmpeg は、`dev\ffmpeg-lgpl` でビルドした LGPL 版の GitHub Release（�
 
 提出の手順と、各欄に書く内容の案は [store-submission.md](store-submission.md) にまとめています。
 
-- Partner Center でアプリ名を予約し、`-IdentityName`、`-Publisher`、`-PublisherDisplayName` をその値にする。
 - Store の掲載情報の「追加のライセンス条項」と説明文に、FFmpeg を LGPLv2.1 で使っていることとソースの場所を書く（文案は `dev\ffmpeg-lgpl\license-notice.md` の 2 と 3）。
 - GitHub Actions でパッケージを作る。
 - SAC がオンの PC（Hyper-V の仮想マシン）で、Store が署名した版を確かめる。
