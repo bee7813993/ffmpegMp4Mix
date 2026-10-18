@@ -46,6 +46,9 @@ jobs:
 
       - name: Build ffmpeg.exe
         id: build
+        env:
+          # プルリクエストの GITHUB_SHA は一時的なマージコミットなので、ブランチのコミットを書く
+          BUILD_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           bash dev/ffmpeg-lgpl/build.sh dist/ffmpeg-lgpl
           . dev/ffmpeg-lgpl/ffmpeg-source.env

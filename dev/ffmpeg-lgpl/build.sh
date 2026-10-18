@@ -11,6 +11,7 @@
 # 環境変数:
 #   WORK_DIR  ダウンロード、展開、ビルドの場所（既定: build/ffmpeg-lgpl）
 #   JOBS      make の並列数（既定: nproc）
+#   BUILD_COMMIT  BUILD.txt に書くスクリプトのコミット（既定: GITHUB_SHA、なければ git の HEAD）
 #
 # 必要なもの（Ubuntu 24.04）: build-essential curl ca-certificates xz-utils gnupg nasm
 #   gcc-mingw-w64-x86-64-win32 binutils-mingw-w64-x86-64 mingw-w64-x86-64-dev
@@ -142,7 +143,7 @@ configure_line="../${name}/configure"
 for option in "${configure_options[@]}"; do
     configure_line+=" \\"$'\n'"    ${option}"
 done
-build_commit=${GITHUB_SHA:-$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || echo unknown)}
+build_commit=${BUILD_COMMIT:-${GITHUB_SHA:-$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || echo unknown)}}
 host_os=$( (. /etc/os-release && echo "$PRETTY_NAME") 2>/dev/null || uname -sr)
 mingw_runtime=$(dpkg-query -W -f='${Version}' mingw-w64-x86-64-dev 2>/dev/null || echo unknown)
 
