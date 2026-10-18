@@ -239,13 +239,17 @@ File order matters. Audio tracks are added in the order passed to `mixtrack_ffmp
 
 2. Enter each audio track name.
 
-   Press `Enter` without input to use the default track name.
+   Press `Enter` without input to use the default track name. If GUI settings have been saved, the GUI's default track names for that track count are used.
 
 3. Enter each audio track's offset in milliseconds.
 
-   `+500` delays the track by 0.5 seconds, and `-500` makes it start 0.5 seconds earlier. Press `Enter` without input for no shift.
+   `+500` delays the track by 0.5 seconds, and `-500` makes it start 0.5 seconds earlier. Press `Enter` without input to use the default shown (normally 0).
 
-4. When complete, `source_video_name_mixed.mp4` is created in the same folder as the video.
+   If **自動調整を常に行う** (always auto-adjust) is on in the GUI settings, auto-adjust runs before the track name prompts and its result becomes the default offset. The result and confidence are shown before each prompt.
+
+   For a low-confidence track (one that could not be matched), `Enter` alone does not continue. Enter `y` to continue with 0, or enter a number.
+
+4. When complete, `source_video_name_mixed.mp4` is created in the same folder as the video. The output suffix follows the GUI settings (including per-track-count suffixes).
 
 ## Settings
 
@@ -292,6 +296,13 @@ Choose how a track is delayed when its offset is positive. Starting a track earl
 Copy-mode delays have been confirmed to play correctly in MPC-BE 1.9.1.
 
 ### CLI Settings
+
+The CLI uses the settings saved from the GUI (`tools\mixtrack_ffmpeg_gui.settings.json`).
+
+- Taken from the GUI settings: default track names (including per-track-count settings), output suffix, delay method, re-encoding bitrate, and whether to always auto-adjust
+- Taken from `mixtrack_ffmpeg.bat`: whether to use the source video's audio (`USE_VIDEO_AUDIO`) and MPC-BE 1.5 compatibility mode (`MPCBE15_COMPAT_MODE`)
+
+If GUI settings have not been saved yet, the `mixtrack_ffmpeg.bat` settings below (track names, suffix, delay method, bitrate) are used. They are also the GUI's defaults on first launch.
 
 Edit `mixtrack_ffmpeg.bat` to change CLI defaults.
 

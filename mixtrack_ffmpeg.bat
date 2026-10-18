@@ -5,6 +5,10 @@ chcp 932
 setlocal EnableExtensions DisableDelayedExpansion
 set "SCRIPT_DIR=%~dp0"
 
+rem GUI”Å‚Åİ’è‚ğ•Û‘¶‚µ‚Ä‚¢‚éê‡itools\mixtrack_ffmpeg_gui.settings.json ‚ª‚ ‚éê‡j‚ÍA
+rem ƒgƒ‰ƒbƒN–¼Eo—Íƒtƒ@ƒCƒ‹–¼‚ÌÚ”öŒêE’x‚ç‚¹‚é•û–@EƒrƒbƒgƒŒ[ƒgE©“®’²®‚ÍGUI”Å‚Ìİ’è‚ğg‚¢‚Ü‚·B
+rem ‰º‚Ìƒgƒ‰ƒbƒN–¼EÚ”öŒêE’x‚ç‚¹‚é•û–@EƒrƒbƒgƒŒ[ƒg‚ÍAGUI”Å‚Ìİ’è‚ª‚Ü‚¾‚È‚¢‚Æ‚«‚Ég‚¢‚Ü‚·B
+
 rem ƒgƒ‰ƒbƒN–¼‰Šú’l
 rem TRACKNAME_3ATRACKNAME_4 ... ‚ğ’Ç‰Á‚·‚é‚ÆA‚»‚Ì”Ô†‚Ì‰Šú’l‚É‚È‚è‚Ü‚·B
 set "TRACKNAME_1=ƒIƒ“ƒ{[ƒJƒ‹"
@@ -12,6 +16,7 @@ set "TRACKNAME_2=ƒIƒtƒ{[ƒJƒ‹"
 set "TRACKNAME_LATER=ƒgƒ‰ƒbƒN"
 
 rem o—Íƒtƒ@ƒCƒ‹–¼‚ÌÚ”öŒê
+set "OUTPUT_SUFFIX_FROM_ENV=%OUTPUT_SUFFIX%"
 if "%OUTPUT_SUFFIX%"=="" set "OUTPUT_SUFFIX=_mixed"
 
 rem ƒtƒ‰ƒOFŒ³‚Ì“®‰æ‚Ì‰¹º‚ğg—p‚·‚éê‡‚Í1Ag—p‚µ‚È‚¢ê‡‚Í0
@@ -31,6 +36,7 @@ rem “ü—Íƒtƒ@ƒCƒ‹ˆê——‚©‚çÅ‰‚Ì mp4 ‚ğ“®‰æ‚Æ‚µ‚Äg—p
 set "VIDEOFILE="
 set "VIDEODIR="
 set "VIDEONAME="
+set "HELPER_AUDIO="
 set /A AUDIO_COUNT=0
 
 :parse_args
@@ -52,6 +58,7 @@ goto parse_args
 :parse_audio_arg
 set /A AUDIO_COUNT+=1
 set "AUDIOFILE_%AUDIO_COUNT%=%~1"
+set HELPER_AUDIO=%HELPER_AUDIO% "%~1"
 shift
 goto parse_args
 
@@ -67,6 +74,7 @@ set /P "USE_VIDEO_AUDIO=Œ³“®‰æ‚Ì‰¹º‚ğ‚Pƒgƒ‰ƒbƒN–Ú‚Ég—p‚µ‚Ü‚·‚©H y0:g—p‚µ‚È‚
 
 :use_video_audio_done
 if "%USE_VIDEO_AUDIO%"=="" set "USE_VIDEO_AUDIO=0"
+call :load_gui_defaults
 
 set "PUSHD_DONE=0"
 
@@ -167,9 +175,31 @@ exit /b
 :read_track_offset
 set "OFFSET_INPUT_OPTION="
 set "OFFSET_OUTPUT_OPTION="
+set "OFFSET_DEFAULT="
+set "OFFSET_LEVEL="
+set "OFFSET_NOTE="
+if "%CLI_DEFAULTS_LOADED%"=="1" call set "OFFSET_DEFAULT=%%CLI_OFFSET_%TRACK_INDEX%%%"
+if "%CLI_DEFAULTS_LOADED%"=="1" call set "OFFSET_LEVEL=%%CLI_LEVEL_%TRACK_INDEX%%%"
+if "%CLI_DEFAULTS_LOADED%"=="1" call set "OFFSET_NOTE=%%CLI_NOTE_%TRACK_INDEX%%%"
+if "%OFFSET_DEFAULT%"=="" set "OFFSET_DEFAULT=0"
+if not "%OFFSET_NOTE%"=="" echo  %OFFSET_NOTE%
+
+:read_track_offset_prompt
 set "TRACKOFFSET="
-set /P "TRACKOFFSET= ƒIƒtƒZƒbƒg(ms)‚ğ“ü—Í [+:’x‚ç‚¹‚é -:‘‚ß‚é] —ª 0F"
-if "%TRACKOFFSET%"=="" exit /b
+if "%OFFSET_LEVEL%"=="low" goto read_track_offset_low
+set /P "TRACKOFFSET= ƒIƒtƒZƒbƒg(ms)‚ğ“ü—Í [+:’x‚ç‚¹‚é -:‘‚ß‚é] —ª %OFFSET_DEFAULT%F"
+if "%TRACKOFFSET%"=="" set "TRACKOFFSET=%OFFSET_DEFAULT%"
+goto read_track_offset_check
+
+rem M—Š“x‚ª’á‚¢ê‡‚ÍAyi0‚Ì‚Ü‚Üi‚Şj‚©”’l‚ğ“ü—Í‚·‚é‚Ü‚Åi‚Ü‚È‚¢
+:read_track_offset_low
+set /P "TRACKOFFSET= ƒIƒtƒZƒbƒg(ms)‚ğ“ü—Í [y:0‚Ì‚Ü‚Üi‚Ş]F"
+if /I "%TRACKOFFSET%"=="y" set "TRACKOFFSET=0"
+if not "%TRACKOFFSET%"=="" goto read_track_offset_check
+echo  M—Š“x‚ª’á‚¢‚½‚ßAy ‚ğ“ü—Í‚·‚é‚©AƒIƒtƒZƒbƒg‚ğ”’l‚Å“ü—Í‚µ‚Ä‚­‚¾‚³‚¢B
+goto read_track_offset_prompt
+
+:read_track_offset_check
 echo(%TRACKOFFSET%| findstr /R /X /C:"[0-9][0-9]*" /C:"+[0-9][0-9]*" /C:"-[0-9][0-9]*" >nul
 if errorlevel 1 goto read_track_offset_invalid
 
@@ -199,10 +229,12 @@ exit /b
 
 :read_track_offset_invalid
 echo  ƒIƒtƒZƒbƒg‚Í®”iƒ~ƒŠ•bj‚Å“ü—Í‚µ‚Ä‚­‚¾‚³‚¢B
-goto read_track_offset
+goto read_track_offset_prompt
 
 :get_track_name_default
 set "TRACKNAME_DEFAULT="
+if "%CLI_DEFAULTS_LOADED%"=="1" call set "TRACKNAME_DEFAULT=%%CLI_NAME_%TRACK_INDEX%%%"
+if not "%TRACKNAME_DEFAULT%"=="" exit /b
 call set "TRACKNAME_DEFAULT=%%TRACKNAME_%TRACK_INDEX%%%"
 if "%TRACKNAME_DEFAULT%"=="" goto get_track_name_default_fallback
 exit /b
@@ -220,6 +252,28 @@ exit /b
 :get_track_name_default_2
 set "TRACKNAME_DEFAULT=%TRACKNAME_2%"
 if "%TRACKNAME_DEFAULT%"=="" set "TRACKNAME_DEFAULT=ƒIƒtƒ{[ƒJƒ‹"
+exit /b
+
+rem GUI”Å‚Ìİ’èiƒgƒ‰ƒbƒN”‚²‚Æ‚Ì‰Šú’lA©“®’²®‚ÌŒ‹‰Êj‚ğ“Ç‚İ‚Ş
+:load_gui_defaults
+set "CLI_DEFAULTS_LOADED="
+set "GUI_SCRIPT=%SCRIPT_DIR%tools\mixtrack_ffmpeg_gui.ps1"
+if not exist "%GUI_SCRIPT%" set "GUI_SCRIPT=%SCRIPT_DIR%mixtrack_ffmpeg_gui.ps1"
+if not exist "%GUI_SCRIPT%" exit /b
+set "HELPER_USE_VIDEO_AUDIO=0"
+if "%USE_VIDEO_AUDIO%"=="1" set "HELPER_USE_VIDEO_AUDIO=1"
+set "CLI_DEFAULTS_FILE=%TEMP%\mixtrack_ffmpeg_%RANDOM%%RANDOM%.cmd"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%GUI_SCRIPT%" -CliDefaults -UseVideoAudio %HELPER_USE_VIDEO_AUDIO% -OutFile "%CLI_DEFAULTS_FILE%" "%VIDEOFILE%"%HELPER_AUDIO%
+if exist "%CLI_DEFAULTS_FILE%" call "%CLI_DEFAULTS_FILE%"
+if exist "%CLI_DEFAULTS_FILE%" del "%CLI_DEFAULTS_FILE%"
+if "%CLI_DEFAULTS_LOADED%"=="1" goto load_gui_defaults_apply
+echo GUI”Å‚Ìİ’è‚ğ“Ç‚İ‚ß‚È‚©‚Á‚½‚½‚ßA‚±‚Ìƒoƒbƒ`‚Ìİ’è‚ğg‚¢‚Ü‚·B
+exit /b
+
+:load_gui_defaults_apply
+if "%OUTPUT_SUFFIX_FROM_ENV%"=="" set "OUTPUT_SUFFIX=%CLI_OUTPUT_SUFFIX%"
+set "DELAY_MODE=%CLI_DELAY_MODE%"
+set "REENCODE_BITRATE=%CLI_REENCODE_BITRATE%"
 exit /b
 
 :end

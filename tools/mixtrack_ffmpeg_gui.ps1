@@ -1,10 +1,15 @@
-﻿param(
+﻿[CmdletBinding(PositionalBinding = $false)]
+param(
     [switch]$ValidateOnly,
+    [switch]$CliDefaults,
+    [int]$UseVideoAudio = 0,
+    [string]$OutFile,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$Files
 )
 
 $ErrorActionPreference = 'Stop'
+$Script:CliMode = $CliDefaults.IsPresent
 $Script:ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Script:RootDir = $Script:ScriptDir
 $parentDir = Split-Path -Parent $Script:ScriptDir
@@ -119,23 +124,26 @@ function Read-BatchDefaultSettings {
     }
 
     foreach ($line in (Get-Content -LiteralPath $batchPath -Encoding Default)) {
-        if ($line -match '^\s*set\s+"?TRACKNAME_(\d+)=(.*?)"?\s*$') {
+        if ($line -match '^\s*:') {
+            break
+        }
+        if ($line -match '^\s*set\s+"?TRACKNAME_(\d+)=(.*?)"?\s*$' -and $Matches[2] -notlike '*%*') {
             $map[$Matches[1]] = $Matches[2]
             continue
         }
-        if ($line -match '^\s*set\s+"?TRACKNAME_LATER=(.*?)"?\s*$') {
+        if ($line -match '^\s*set\s+"?TRACKNAME_LATER=(.*?)"?\s*$' -and $Matches[1] -notlike '*%*') {
             $laterName = $Matches[1]
             continue
         }
-        if ($line -match '^\s*(?:if\s+.*?\s+)?set\s+"?OUTPUT_SUFFIX=(.*?)"?\s*$') {
+        if ($line -match '^\s*(?:if\s+.*?\s+)?set\s+"?OUTPUT_SUFFIX=(.*?)"?\s*$' -and $Matches[1] -notlike '*%*') {
             $suffix = $Matches[1]
             continue
         }
-        if ($line -match '^\s*set\s+"?DELAY_MODE=(.*?)"?\s*$') {
+        if ($line -match '^\s*set\s+"?DELAY_MODE=(.*?)"?\s*$' -and $Matches[1] -notlike '*%*') {
             $delayMode = $Matches[1]
             continue
         }
-        if ($line -match '^\s*set\s+"?REENCODE_BITRATE=(.*?)"?\s*$') {
+        if ($line -match '^\s*set\s+"?REENCODE_BITRATE=(.*?)"?\s*$' -and $Matches[1] -notlike '*%*') {
             $reencodeBitrate = $Matches[1]
             continue
         }
@@ -402,12 +410,17 @@ function Read-Settings {
             }
         }
         catch {
-            [System.Windows.Forms.MessageBox]::Show(
-                "設定ファイルを読み込めませんでした。初期設定で起動します。`r`n`r`n$($_.Exception.Message)",
-                'ffmpegMp4Mix GUI',
-                [System.Windows.Forms.MessageBoxButtons]::OK,
-                [System.Windows.Forms.MessageBoxIcon]::Warning
-            ) | Out-Null
+            if ($Script:CliMode) {
+                Write-Host "GUI版の設定ファイルを読み込めなかったため、初期設定を使います。$($_.Exception.Message)"
+            }
+            else {
+                [System.Windows.Forms.MessageBox]::Show(
+                    "設定ファイルを読み込めませんでした。初期設定で起動します。`r`n`r`n$($_.Exception.Message)",
+                    'ffmpegMp4Mix GUI',
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Warning
+                ) | Out-Null
+            }
             $settings = Read-BatchDefaultSettings
         }
     }
@@ -745,6 +758,92 @@ function Format-AutoOffsetNote {
         $note += "`r`n" + ('テンポか長さが違う可能性があります（曲の途中で最大 {0:0}ms ずれます）。' -f $Result.DriftMs)
     }
     return $note
+}
+
+function ConvertTo-BatchValue {
+    param(
+        [string]$Value,
+        [switch]$ForEcho
+    )
+
+    $text = ([string]$Value) -replace "[`r`n]+", ' '
+    $text = $text.Replace('"', '')
+    if ($ForEcho) {
+        $text = $text -replace '[&<>|^]', ' '
+    }
+    return $text.Replace('%', '%%')
+}
+
+function Write-CliDefaults {
+    param(
+        [string[]]$InputFiles,
+        [bool]$UseVideoAudio,
+        [string]$OutFile
+    )
+
+    Initialize-InputFiles -InputFiles $InputFiles -Settings $Script:Settings
+    $tracks = @()
+    if ($UseVideoAudio -and (Test-VideoSelected)) {
+        $tracks += [PSCustomObject]@{ SourceFile = $Script:VideoFile; IsVideoAudio = $true }
+    }
+    foreach ($audioFile in $Script:AudioFiles) {
+        $tracks += [PSCustomObject]@{ SourceFile = $audioFile; IsVideoAudio = $false }
+    }
+    $trackCount = $tracks.Count
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('set "CLI_OUTPUT_SUFFIX=' + (ConvertTo-BatchValue (Get-OutputSuffix -Settings $Script:Settings -TrackCount $trackCount)) + '"')
+    $lines.Add('set "CLI_DELAY_MODE=' + (ConvertTo-DelayMode $Script:Settings.DelayMode) + '"')
+    $lines.Add('set "CLI_REENCODE_BITRATE=' + (ConvertTo-ReencodeBitrate $Script:Settings.ReencodeBitrate) + '"')
+
+    $reference = $null
+    $ffmpegPath = Get-SupportFilePath -FileName 'ffmpeg.exe'
+    $autoOffset = (ConvertTo-SettingFlag $Script:Settings.AutoOffsetAlways) -and (Test-VideoSelected)
+    if ($autoOffset) {
+        Write-Host '自動調整: 動画の音声を解析しています...'
+        try {
+            $reference = [AudioOffsetAnalyzer]::Load($ffmpegPath, $Script:VideoFile)
+        }
+        catch {
+            Write-Host '自動調整: 動画の音声を解析できなかったため、自動調整をしません。'
+            $autoOffset = $false
+        }
+    }
+
+    for ($index = 0; $index -lt $trackCount; $index++) {
+        $position = $index + 1
+        $track = $tracks[$index]
+        $name = Get-DefaultTrackName -Settings $Script:Settings -TrackIndex $position -TrackCount $trackCount
+        $offsetMs = 0
+        $level = ''
+        $note = ''
+        if ($autoOffset -and -not $track.IsVideoAudio) {
+            Write-Host ('自動調整中 ({0}/{1}): {2}' -f $position, $trackCount, [System.IO.Path]::GetFileName($track.SourceFile))
+            try {
+                $result = [AudioOffsetAnalyzer]::Analyze($reference, [AudioOffsetAnalyzer]::Load($ffmpegPath, $track.SourceFile))
+                $note = Format-AutoOffsetNote $result
+                switch ([string]$result.Level) {
+                    '高' { $level = 'high' }
+                    '中' { $level = 'medium' }
+                    default { $level = 'low' }
+                }
+                if ($level -ne 'low') {
+                    $offsetMs = [int]$result.OffsetMs
+                }
+            }
+            catch {
+                $level = 'low'
+                $note = '自動調整できませんでした: ' + $_.Exception.GetBaseException().Message
+            }
+        }
+
+        $lines.Add(('set "CLI_NAME_{0}={1}"' -f $position, (ConvertTo-BatchValue $name)))
+        $lines.Add(('set "CLI_OFFSET_{0}={1}"' -f $position, (Format-OffsetMs $offsetMs)))
+        $lines.Add(('set "CLI_LEVEL_{0}={1}"' -f $position, $level))
+        $lines.Add(('set "CLI_NOTE_{0}={1}"' -f $position, (ConvertTo-BatchValue $note -ForEcho)))
+    }
+    $lines.Add('set "CLI_DEFAULTS_LOADED=1"')
+    [System.IO.File]::WriteAllLines($OutFile, $lines, [System.Text.Encoding]::GetEncoding(932))
 }
 
 function Get-AutoOffsetReference {
@@ -4474,6 +4573,11 @@ public static class AudioOffsetAnalyzer
 $Script:Settings = Read-Settings
 
 if ($ValidateOnly) {
+    exit 0
+}
+
+if ($CliDefaults) {
+    Write-CliDefaults -InputFiles $Files -UseVideoAudio ($UseVideoAudio -eq 1) -OutFile $OutFile
     exit 0
 }
 
