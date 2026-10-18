@@ -2053,7 +2053,9 @@ function Show-MainForm {
             $offsetMs += $DeltaMs
             $row.Cells[$offsetColumnIndex].Value = Format-OffsetMs $offsetMs
             $row.Tag.OffsetMs = $offsetMs
-            Set-OffsetCellNote -Row $row -Note '' -NoteLevel ''
+            if (-not $AllTracks -or [string]$row.Tag.OffsetNoteLevel -ne 'error') {
+                Set-OffsetCellNote -Row $row -Note '' -NoteLevel ''
+            }
         }
 
         if ($statusLabel.Text -eq $offsetErrorMessage -or $statusLabel.Text -eq $allOffsetErrorMessage) {
@@ -2912,6 +2914,25 @@ function Show-MainForm {
             if ([string]::IsNullOrWhiteSpace($outputPath)) {
                 Show-ErrorMessage '出力ファイルを指定してください。'
                 return
+            }
+
+            $unadjustedTracks = @()
+            for ($index = 0; $index -lt $trackItems.Count; $index++) {
+                if ([string]$trackItems[$index].OffsetNoteLevel -eq 'error') {
+                    $unadjustedTracks += '・{0}. {1}（{2}）' -f ($index + 1), $trackItems[$index].Title, [System.IO.Path]::GetFileName([string]$trackItems[$index].SourceFile)
+                }
+            }
+            if ($unadjustedTracks.Count -gt 0) {
+                $answer = [System.Windows.Forms.MessageBox]::Show(
+                    "自動調整でずれを判定できなかったトラックがあります。オフセットが合っていない可能性があります。`r`n`r`n" + ($unadjustedTracks -join "`r`n") + "`r`n`r`nこのまま保存しますか？",
+                    'ffmpegMp4Mix GUI',
+                    [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                    [System.Windows.Forms.MessageBoxIcon]::Warning,
+                    [System.Windows.Forms.MessageBoxDefaultButton]::Button2
+                )
+                if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) {
+                    return
+                }
             }
 
             $statusLabel.Text = '保存中...'
