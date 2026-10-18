@@ -253,10 +253,10 @@ File order matters. Audio tracks are added in the order passed to `mixtrack_ffmp
 
 Use the GUI **Settings** button to change:
 
-- Default track names by track number
+- Default track names by track number (can differ by track count)
+- Output file suffix (can differ by track count)
 - Track name candidates
 - Default name for later tracks
-- Output file suffix
 - Delay method and re-encoding bitrate
 - Step used by the offset buttons
 - Whether to always auto-adjust
@@ -264,6 +264,21 @@ Use the GUI **Settings** button to change:
 GUI settings are saved to `tools\mixtrack_ffmpeg_gui.settings.json`.
 
 On first launch, the GUI reads `TRACKNAME_1`, `TRACKNAME_2`, `TRACKNAME_3` ..., `TRACKNAME_LATER`, `OUTPUT_SUFFIX`, `DELAY_MODE`, and `REENCODE_BITRATE` from `mixtrack_ffmpeg.bat` as defaults.
+
+### Track Names and Output Suffix by Track Count
+
+Use **トラック数** (track count) at the top of the Settings window to choose what you are editing.
+
+- **共通（下記以外のトラック数）** (common): default track names and output suffix used for any track count without its own settings.
+- **2トラックのとき** (for 2 tracks) and so on: select a track count and check **このトラック数専用の設定にする** (use settings for this track count) to create settings for that count, starting from the common values. Track counts with their own settings are marked "（専用）".
+- Unchecking it deletes those settings and goes back to the common values. While it is unchecked, the values actually used for that track count are shown in gray.
+- Track numbers left out of a track-count setting use the common default names, and an empty output suffix uses the common suffix.
+
+The track count is the number of rows in the track list, including the source video's audio row when it is used.
+
+- When the window opens with files, the track names and output suffix for that track count are used.
+- When tracks are added, only the added tracks get default names for the new track count. Existing track names are not changed.
+- When the track count changes and the output path is still the default, it is updated to use the output suffix for the new track count.
 
 ### Delay Method
 

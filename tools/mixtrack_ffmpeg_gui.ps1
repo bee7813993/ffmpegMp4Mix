@@ -246,9 +246,104 @@ function Get-TrackNameCandidates {
     }
     if ($null -ne $Settings) {
         Add-UniqueStringValue -List $list -Value $Settings.LaterName
+        $profiles = ConvertTo-TrackCountProfiles $Settings.TrackCountProfiles
+        foreach ($count in $profiles.Keys) {
+            $profileMap = Get-TrackNameMap $profiles[$count]
+            foreach ($key in (Get-SortedTrackNameKeys $profileMap)) {
+                Add-UniqueStringValue -List $list -Value $profileMap[$key]
+            }
+        }
     }
 
     return @($list.ToArray())
+}
+
+function ConvertTo-TrackCountProfiles {
+    param([object]$Profiles)
+
+    $entries = @{}
+    if ($null -ne $Profiles) {
+        $pairs = @()
+        if ($Profiles -is [System.Collections.IDictionary]) {
+            foreach ($key in @($Profiles.Keys)) {
+                $pairs += [PSCustomObject]@{ Name = [string]$key; Value = $Profiles[$key] }
+            }
+        }
+        else {
+            foreach ($property in $Profiles.PSObject.Properties) {
+                $pairs += [PSCustomObject]@{ Name = [string]$property.Name; Value = $property.Value }
+            }
+        }
+
+        foreach ($pair in $pairs) {
+            $count = 0
+            if (-not [int]::TryParse($pair.Name, [ref]$count) -or $count -le 0 -or $null -eq $pair.Value) {
+                continue
+            }
+
+            $names = [ordered]@{}
+            $map = Get-TrackNameMap $pair.Value
+            foreach ($key in (Get-SortedTrackNameKeys $map)) {
+                if (-not [string]::IsNullOrWhiteSpace($map[$key])) {
+                    $names[[string][int]$key] = [string]$map[$key]
+                }
+            }
+            $entries[$count] = [PSCustomObject]@{
+                TrackNames   = $names
+                OutputSuffix = [string]$pair.Value.OutputSuffix
+            }
+        }
+    }
+
+    $result = [ordered]@{}
+    foreach ($count in ($entries.Keys | Sort-Object)) {
+        $result[[string]$count] = $entries[$count]
+    }
+    return $result
+}
+
+function Get-TrackCountProfile {
+    param(
+        [object]$Settings,
+        [int]$TrackCount
+    )
+
+    if ($null -eq $Settings -or $TrackCount -le 0 -or $null -eq $Settings.TrackCountProfiles) {
+        return $null
+    }
+
+    $key = [string]$TrackCount
+    $profiles = $Settings.TrackCountProfiles
+    if ($profiles -is [System.Collections.IDictionary]) {
+        if ($profiles.Contains($key)) {
+            return $profiles[$key]
+        }
+        return $null
+    }
+
+    $property = $profiles.PSObject.Properties[$key]
+    if ($null -ne $property) {
+        return $property.Value
+    }
+    return $null
+}
+
+function Get-OutputSuffix {
+    param(
+        [object]$Settings,
+        [int]$TrackCount = 0
+    )
+
+    $countProfile = Get-TrackCountProfile -Settings $Settings -TrackCount $TrackCount
+    if ($null -ne $countProfile -and -not [string]::IsNullOrWhiteSpace([string]$countProfile.OutputSuffix)) {
+        return [string]$countProfile.OutputSuffix
+    }
+
+    $suffix = [string]$Settings.OutputSuffix
+    if ([string]::IsNullOrWhiteSpace($suffix)) {
+        return '_mixed'
+    }
+    return $suffix
 }
 
 function ConvertTo-SavedSettings {
@@ -260,7 +355,8 @@ function ConvertTo-SavedSettings {
         [string]$DelayMode = 'copy',
         [string]$ReencodeBitrate = '256k',
         [object]$OffsetStepMs = 100,
-        [object]$AutoOffsetAlways = $false
+        [object]$AutoOffsetAlways = $false,
+        [object]$TrackCountProfiles = $null
     )
 
     $orderedNames = [ordered]@{}
@@ -285,6 +381,7 @@ function ConvertTo-SavedSettings {
         TrackNames          = $orderedNames
         LaterName           = $LaterName
         OutputSuffix        = $OutputSuffix
+        TrackCountProfiles  = ConvertTo-TrackCountProfiles $TrackCountProfiles
         TrackNameCandidates = @($candidates.ToArray())
         DelayMode           = ConvertTo-DelayMode $DelayMode
         ReencodeBitrate     = ConvertTo-ReencodeBitrate $ReencodeBitrate
@@ -341,6 +438,7 @@ function Read-Settings {
         ReencodeBitrate = [string]$settings.ReencodeBitrate
         OffsetStepMs    = $settings.OffsetStepMs
         AutoOffsetAlways = $settings.AutoOffsetAlways
+        TrackCountProfiles = $settings.TrackCountProfiles
     }
     if ($null -ne $settings.PSObject.Properties['TrackNameCandidates']) {
         $convertParams.TrackNameCandidates = @(Get-TrackNameCandidates -Settings $settings)
@@ -356,39 +454,52 @@ function Save-Settings {
     Set-Content -LiteralPath $Script:ConfigPath -Value $json -Encoding UTF8
 }
 
+function Get-TrackNameDefaultsSignature {
+    param([object]$Settings)
+
+    $parts = New-Object System.Collections.ArrayList
+    [void]$parts.Add('later=' + [string]$Settings.LaterName)
+    $map = Get-TrackNameMap $Settings
+    foreach ($key in (Get-SortedTrackNameKeys $map)) {
+        [void]$parts.Add('0:' + $key + '=' + $map[$key])
+    }
+
+    $profiles = ConvertTo-TrackCountProfiles $Settings.TrackCountProfiles
+    foreach ($count in $profiles.Keys) {
+        $profileMap = Get-TrackNameMap $profiles[$count]
+        foreach ($key in (Get-SortedTrackNameKeys $profileMap)) {
+            [void]$parts.Add($count + ':' + $key + '=' + $profileMap[$key])
+        }
+    }
+    return ($parts -join "`n")
+}
+
 function Test-TrackNameDefaultsChanged {
     param(
         [object]$OldSettings,
         [object]$NewSettings
     )
 
-    if ([string]$OldSettings.LaterName -cne [string]$NewSettings.LaterName) {
-        return $true
-    }
-
-    $oldMap = Get-TrackNameMap $OldSettings
-    $newMap = Get-TrackNameMap $NewSettings
-    if ($oldMap.Count -ne $newMap.Count) {
-        return $true
-    }
-
-    foreach ($key in @($oldMap.Keys)) {
-        if (-not $newMap.ContainsKey($key) -or [string]$oldMap[$key] -cne [string]$newMap[$key]) {
-            return $true
-        }
-    }
-
-    return $false
+    return (Get-TrackNameDefaultsSignature $OldSettings) -cne (Get-TrackNameDefaultsSignature $NewSettings)
 }
 
 function Get-DefaultTrackName {
     param(
         [object]$Settings,
-        [int]$TrackIndex
+        [int]$TrackIndex,
+        [int]$TrackCount = 0
     )
 
-    $map = Get-TrackNameMap $Settings
     $key = [string]$TrackIndex
+    $countProfile = Get-TrackCountProfile -Settings $Settings -TrackCount $TrackCount
+    if ($null -ne $countProfile) {
+        $profileMap = Get-TrackNameMap $countProfile
+        if ($profileMap.ContainsKey($key) -and -not [string]::IsNullOrWhiteSpace($profileMap[$key])) {
+            return $profileMap[$key]
+        }
+    }
+
+    $map = Get-TrackNameMap $Settings
     if ($map.ContainsKey($key) -and -not [string]::IsNullOrWhiteSpace($map[$key])) {
         return $map[$key]
     }
@@ -403,7 +514,8 @@ function Get-DefaultTrackName {
 function Get-DefaultOutputPath {
     param(
         [string]$VideoFile,
-        [object]$Settings
+        [object]$Settings,
+        [int]$TrackCount = 0
     )
 
     if ([string]::IsNullOrWhiteSpace($VideoFile)) {
@@ -412,11 +524,7 @@ function Get-DefaultOutputPath {
 
     $directory = Split-Path -Parent $VideoFile
     $baseName = [System.IO.Path]::GetFileNameWithoutExtension($VideoFile)
-    $suffix = [string]$Settings.OutputSuffix
-    if ([string]::IsNullOrWhiteSpace($suffix)) {
-        $suffix = '_mixed'
-    }
-    Join-Path $directory ($baseName + $suffix + '.mp4')
+    Join-Path $directory ($baseName + (Get-OutputSuffix -Settings $Settings -TrackCount $TrackCount) + '.mp4')
 }
 
 function Test-VideoSelected {
@@ -534,7 +642,7 @@ function Initialize-InputFiles {
         $Script:AudioFiles += [System.IO.Path]::GetFullPath($inputFiles[$index])
     }
 
-    $Script:DefaultOutputPath = Get-DefaultOutputPath -VideoFile $Script:VideoFile -Settings $Settings
+    $Script:DefaultOutputPath = Get-DefaultOutputPath -VideoFile $Script:VideoFile -Settings $Settings -TrackCount $Script:AudioFiles.Count
 }
 
 function ConvertTo-CommandLineArgument {
@@ -1151,16 +1259,14 @@ function Add-TrackFilesToGrid {
 
     $firstAddedRow = -1
     $addedCount = 0
+    $validFiles = @($FilePaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) })
+    $trackCount = $Grid.Rows.Count + $validFiles.Count
 
-    foreach ($filePath in $FilePaths) {
-        if ([string]::IsNullOrWhiteSpace($filePath) -or -not (Test-Path -LiteralPath $filePath -PathType Leaf)) {
-            continue
-        }
-
+    foreach ($filePath in $validFiles) {
         $fullPath = [System.IO.Path]::GetFullPath($filePath)
         $Script:AudioFiles += $fullPath
         $trackIndex = $Grid.Rows.Count + 1
-        $title = Get-DefaultTrackName -Settings $Settings -TrackIndex $trackIndex
+        $title = Get-DefaultTrackName -Settings $Settings -TrackIndex $trackIndex -TrackCount $trackCount
         $item = New-TrackItem -SourceFile $fullPath -IsVideoAudio $false -Title $title
         Add-TrackRow -Grid $Grid -Item $item
 
@@ -1496,20 +1602,68 @@ function Show-SettingsDialog {
     $dialog = New-Object System.Windows.Forms.Form
     $dialog.Text = '設定'
     $dialog.StartPosition = 'CenterParent'
-    $dialog.Size = New-Object System.Drawing.Size(560, 704)
-    $dialog.MinimumSize = New-Object System.Drawing.Size(520, 624)
+    $dialog.Size = New-Object System.Drawing.Size(560, 672)
+    $dialog.MinimumSize = New-Object System.Drawing.Size(520, 592)
     Set-FormTheme -Form $dialog
 
+    $editor = [PSCustomObject]@{
+        Common       = @{ Names = (Get-TrackNameMap $CurrentSettings); Suffix = [string]$CurrentSettings.OutputSuffix }
+        Profiles     = @{}
+        Current      = 0
+        CurrentIndex = 0
+        Suppress     = $false
+    }
+    $savedProfiles = ConvertTo-TrackCountProfiles $CurrentSettings.TrackCountProfiles
+    foreach ($key in $savedProfiles.Keys) {
+        $editor.Profiles[[int]$key] = @{ Names = (Get-TrackNameMap $savedProfiles[$key]); Suffix = [string]$savedProfiles[$key].OutputSuffix }
+    }
+
+    $comboCounts = New-Object System.Collections.ArrayList
+    [void]$comboCounts.Add(0)
+    foreach ($count in @(@(1..10) + @($editor.Profiles.Keys) | Sort-Object -Unique)) {
+        [void]$comboCounts.Add([int]$count)
+    }
+
+    $profileLabel = New-Object System.Windows.Forms.Label
+    $profileLabel.Text = 'トラック数'
+    $profileLabel.Location = New-Object System.Drawing.Point(12, 15)
+    $profileLabel.Size = New-Object System.Drawing.Size(70, 22)
+    $profileLabel.Anchor = 'Left,Top'
+    Set-LabelTheme -Label $profileLabel -Muted
+
+    $profileCombo = New-Object System.Windows.Forms.ComboBox
+    $profileCombo.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+    $profileCombo.Location = New-Object System.Drawing.Point(88, 12)
+    $profileCombo.Size = New-Object System.Drawing.Size(210, 22)
+    $profileCombo.Anchor = 'Left,Top'
+    $profileCombo.TabIndex = 0
+    Set-ComboBoxTheme -ComboBox $profileCombo
+
+    $profileCheck = New-Object System.Windows.Forms.CheckBox
+    $profileCheck.Text = 'このトラック数専用の設定にする'
+    $profileCheck.Location = New-Object System.Drawing.Point(310, 13)
+    $profileCheck.Size = New-Object System.Drawing.Size(222, 24)
+    $profileCheck.Anchor = 'Left,Top'
+    $profileCheck.TabIndex = 1
+    Set-CheckBoxTheme -CheckBox $profileCheck
+
+    $profileHint = New-Object System.Windows.Forms.Label
+    $profileHint.Text = '専用の設定がないトラック数で使います'
+    $profileHint.Location = New-Object System.Drawing.Point(310, 15)
+    $profileHint.Size = New-Object System.Drawing.Size(222, 22)
+    $profileHint.Anchor = 'Left,Top'
+    Set-LabelTheme -Label $profileHint -Muted
+
     $grid = New-Object System.Windows.Forms.DataGridView
-    $grid.Location = New-Object System.Drawing.Point(12, 12)
-    $grid.Size = New-Object System.Drawing.Size(520, 180)
+    $grid.Location = New-Object System.Drawing.Point(12, 44)
+    $grid.Size = New-Object System.Drawing.Size(520, 150)
     $grid.Anchor = 'Top,Left,Right'
     $grid.AllowUserToAddRows = $false
     $grid.AllowUserToDeleteRows = $false
     $grid.AutoSizeColumnsMode = 'Fill'
     $grid.SelectionMode = 'FullRowSelect'
     $grid.MultiSelect = $false
-    $grid.TabIndex = 0
+    $grid.TabIndex = 2
     Set-GridTheme -Grid $grid
 
     $numberColumn = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
@@ -1522,26 +1676,41 @@ function Show-SettingsDialog {
     $nameColumn.FillWeight = 75
     $grid.Columns.Add($nameColumn) | Out-Null
 
-    $map = Get-TrackNameMap $CurrentSettings
-    foreach ($key in (Get-SortedTrackNameKeys $map)) {
-        $grid.Rows.Add($key, $map[$key]) | Out-Null
-    }
-
     $addButton = New-Object System.Windows.Forms.Button
     $addButton.Text = '+ 追加'
-    $addButton.Location = New-Object System.Drawing.Point(12, 204)
+    $addButton.Location = New-Object System.Drawing.Point(12, 200)
     $addButton.Size = New-Object System.Drawing.Size(80, 28)
     $addButton.Anchor = 'Left,Top'
-    $addButton.TabIndex = 1
+    $addButton.TabIndex = 3
     Set-ButtonTheme -Button $addButton
 
     $deleteButton = New-Object System.Windows.Forms.Button
     $deleteButton.Text = '- 削除'
-    $deleteButton.Location = New-Object System.Drawing.Point(98, 204)
+    $deleteButton.Location = New-Object System.Drawing.Point(98, 200)
     $deleteButton.Size = New-Object System.Drawing.Size(80, 28)
     $deleteButton.Anchor = 'Left,Top'
-    $deleteButton.TabIndex = 2
+    $deleteButton.TabIndex = 4
     Set-ButtonTheme -Button $deleteButton -Kind Danger
+
+    $suffixLabel = New-Object System.Windows.Forms.Label
+    $suffixLabel.Text = '出力接尾語'
+    $suffixLabel.Location = New-Object System.Drawing.Point(196, 205)
+    $suffixLabel.Size = New-Object System.Drawing.Size(80, 22)
+    $suffixLabel.Anchor = 'Left,Top'
+    Set-LabelTheme -Label $suffixLabel -Muted
+
+    $suffixText = New-Object System.Windows.Forms.TextBox
+    $suffixText.Location = New-Object System.Drawing.Point(282, 202)
+    $suffixText.Size = New-Object System.Drawing.Size(250, 22)
+    $suffixText.Anchor = 'Top,Left,Right'
+    $suffixText.TabIndex = 5
+    Set-TextBoxTheme -TextBox $suffixText
+
+    $separator = New-Object System.Windows.Forms.Label
+    $separator.Location = New-Object System.Drawing.Point(12, 238)
+    $separator.Size = New-Object System.Drawing.Size(520, 1)
+    $separator.Anchor = 'Top,Left,Right'
+    $separator.BackColor = Get-UiColor 'Border'
 
     $candidateLabel = New-Object System.Windows.Forms.Label
     $candidateLabel.Text = 'トラック名候補 (1行1件)'
@@ -1558,7 +1727,7 @@ function Show-SettingsDialog {
     $candidateText.Location = New-Object System.Drawing.Point(12, 270)
     $candidateText.Size = New-Object System.Drawing.Size(520, 88)
     $candidateText.Anchor = 'Top,Left,Right'
-    $candidateText.TabIndex = 3
+    $candidateText.TabIndex = 6
     Set-TextBoxTheme -TextBox $candidateText
 
     $laterLabel = New-Object System.Windows.Forms.Label
@@ -1573,27 +1742,12 @@ function Show-SettingsDialog {
     $laterText.Location = New-Object System.Drawing.Point(158, 371)
     $laterText.Size = New-Object System.Drawing.Size(374, 22)
     $laterText.Anchor = 'Left,Right,Bottom'
-    $laterText.TabIndex = 4
+    $laterText.TabIndex = 7
     Set-TextBoxTheme -TextBox $laterText
-
-    $suffixLabel = New-Object System.Windows.Forms.Label
-    $suffixLabel.Text = '出力接尾語'
-    $suffixLabel.Location = New-Object System.Drawing.Point(12, 406)
-    $suffixLabel.Size = New-Object System.Drawing.Size(140, 22)
-    $suffixLabel.Anchor = 'Left,Bottom'
-    Set-LabelTheme -Label $suffixLabel -Muted
-
-    $suffixText = New-Object System.Windows.Forms.TextBox
-    $suffixText.Text = [string]$CurrentSettings.OutputSuffix
-    $suffixText.Location = New-Object System.Drawing.Point(158, 403)
-    $suffixText.Size = New-Object System.Drawing.Size(374, 22)
-    $suffixText.Anchor = 'Left,Right,Bottom'
-    $suffixText.TabIndex = 5
-    Set-TextBoxTheme -TextBox $suffixText
 
     $delayModeLabel = New-Object System.Windows.Forms.Label
     $delayModeLabel.Text = '遅らせる方法'
-    $delayModeLabel.Location = New-Object System.Drawing.Point(12, 438)
+    $delayModeLabel.Location = New-Object System.Drawing.Point(12, 406)
     $delayModeLabel.Size = New-Object System.Drawing.Size(140, 22)
     $delayModeLabel.Anchor = 'Left,Bottom'
     Set-LabelTheme -Label $delayModeLabel -Muted
@@ -1603,68 +1757,238 @@ function Show-SettingsDialog {
     [void]$delayModeCombo.Items.Add('コピー（再エンコードなし）')
     [void]$delayModeCombo.Items.Add('再エンコード（AAC）')
     $delayModeCombo.SelectedIndex = if ((ConvertTo-DelayMode $CurrentSettings.DelayMode) -eq 'reencode') { 1 } else { 0 }
-    $delayModeCombo.Location = New-Object System.Drawing.Point(158, 435)
+    $delayModeCombo.Location = New-Object System.Drawing.Point(158, 403)
     $delayModeCombo.Size = New-Object System.Drawing.Size(374, 22)
     $delayModeCombo.Anchor = 'Left,Right,Bottom'
-    $delayModeCombo.TabIndex = 6
+    $delayModeCombo.TabIndex = 8
     Set-ComboBoxTheme -ComboBox $delayModeCombo
 
     $bitrateLabel = New-Object System.Windows.Forms.Label
     $bitrateLabel.Text = 'ビットレート'
-    $bitrateLabel.Location = New-Object System.Drawing.Point(12, 470)
+    $bitrateLabel.Location = New-Object System.Drawing.Point(12, 438)
     $bitrateLabel.Size = New-Object System.Drawing.Size(140, 22)
     $bitrateLabel.Anchor = 'Left,Bottom'
     Set-LabelTheme -Label $bitrateLabel -Muted
 
     $bitrateText = New-Object System.Windows.Forms.TextBox
     $bitrateText.Text = ConvertTo-ReencodeBitrate $CurrentSettings.ReencodeBitrate
-    $bitrateText.Location = New-Object System.Drawing.Point(158, 467)
+    $bitrateText.Location = New-Object System.Drawing.Point(158, 435)
     $bitrateText.Size = New-Object System.Drawing.Size(120, 22)
     $bitrateText.Anchor = 'Left,Bottom'
-    $bitrateText.TabIndex = 7
+    $bitrateText.TabIndex = 9
     $bitrateText.Enabled = $delayModeCombo.SelectedIndex -eq 1
     Set-TextBoxTheme -TextBox $bitrateText
 
     $offsetStepLabel = New-Object System.Windows.Forms.Label
     $offsetStepLabel.Text = 'オフセット増減幅(ms)'
-    $offsetStepLabel.Location = New-Object System.Drawing.Point(12, 502)
+    $offsetStepLabel.Location = New-Object System.Drawing.Point(12, 470)
     $offsetStepLabel.Size = New-Object System.Drawing.Size(140, 22)
     $offsetStepLabel.Anchor = 'Left,Bottom'
     Set-LabelTheme -Label $offsetStepLabel -Muted
 
     $offsetStepText = New-Object System.Windows.Forms.TextBox
     $offsetStepText.Text = [string](ConvertTo-OffsetStepMs $CurrentSettings.OffsetStepMs)
-    $offsetStepText.Location = New-Object System.Drawing.Point(158, 499)
+    $offsetStepText.Location = New-Object System.Drawing.Point(158, 467)
     $offsetStepText.Size = New-Object System.Drawing.Size(120, 22)
     $offsetStepText.Anchor = 'Left,Bottom'
-    $offsetStepText.TabIndex = 8
+    $offsetStepText.TabIndex = 10
     Set-TextBoxTheme -TextBox $offsetStepText
 
     $autoOffsetCheck = New-Object System.Windows.Forms.CheckBox
     $autoOffsetCheck.Text = '自動調整を常に行う（開いたとき・トラック追加時・動画変更時）'
     $autoOffsetCheck.Checked = ConvertTo-SettingFlag $CurrentSettings.AutoOffsetAlways
-    $autoOffsetCheck.Location = New-Object System.Drawing.Point(12, 532)
+    $autoOffsetCheck.Location = New-Object System.Drawing.Point(12, 500)
     $autoOffsetCheck.Size = New-Object System.Drawing.Size(520, 24)
     $autoOffsetCheck.Anchor = 'Left,Right,Bottom'
-    $autoOffsetCheck.TabIndex = 9
+    $autoOffsetCheck.TabIndex = 11
     Set-CheckBoxTheme -CheckBox $autoOffsetCheck
 
     $okButton = New-Object System.Windows.Forms.Button
     $okButton.Text = '保存'
-    $okButton.Location = New-Object System.Drawing.Point(356, 618)
+    $okButton.Location = New-Object System.Drawing.Point(356, 586)
     $okButton.Size = New-Object System.Drawing.Size(84, 30)
     $okButton.Anchor = 'Right,Bottom'
-    $okButton.TabIndex = 10
+    $okButton.TabIndex = 12
     Set-ButtonTheme -Button $okButton -Kind Primary
 
     $cancelButton = New-Object System.Windows.Forms.Button
     $cancelButton.Text = 'キャンセル'
-    $cancelButton.Location = New-Object System.Drawing.Point(448, 618)
+    $cancelButton.Location = New-Object System.Drawing.Point(448, 586)
     $cancelButton.Size = New-Object System.Drawing.Size(84, 30)
     $cancelButton.Anchor = 'Right,Bottom'
-    $cancelButton.TabIndex = 11
+    $cancelButton.TabIndex = 13
     $cancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     Set-ButtonTheme -Button $cancelButton
+
+    function Get-ProfileItemText {
+        param([int]$Count)
+
+        if ($Count -eq 0) {
+            return '共通（下記以外のトラック数）'
+        }
+        $text = '{0}トラックのとき' -f $Count
+        if ($editor.Profiles.ContainsKey($Count)) {
+            $text += '（専用）'
+        }
+        return $text
+    }
+
+    function Update-ProfileItemTexts {
+        $editor.Suppress = $true
+        try {
+            $selected = $profileCombo.SelectedIndex
+            for ($index = 0; $index -lt $comboCounts.Count; $index++) {
+                $text = Get-ProfileItemText ([int]$comboCounts[$index])
+                if ([string]$profileCombo.Items[$index] -ne $text) {
+                    $profileCombo.Items[$index] = $text
+                }
+            }
+            $profileCombo.SelectedIndex = $selected
+        }
+        finally {
+            $editor.Suppress = $false
+        }
+    }
+
+    function Get-InheritedNames {
+        param([int]$Count)
+
+        $later = ([string]$laterText.Text).Trim()
+        if ([string]::IsNullOrWhiteSpace($later)) {
+            $later = 'トラック'
+        }
+
+        $names = @{}
+        for ($number = 1; $number -le $Count; $number++) {
+            $key = [string]$number
+            if ($editor.Common.Names.ContainsKey($key) -and -not [string]::IsNullOrWhiteSpace([string]$editor.Common.Names[$key])) {
+                $names[$key] = [string]$editor.Common.Names[$key]
+            }
+            else {
+                $names[$key] = $later
+            }
+        }
+        return $names
+    }
+
+    function Read-NameGrid {
+        [void]$grid.EndEdit()
+        $names = @{}
+        foreach ($row in $grid.Rows) {
+            if ($row.IsNewRow) {
+                continue
+            }
+
+            $numberText = [string]$row.Cells[0].Value
+            $nameText = [string]$row.Cells[1].Value
+            $number = 0
+            if (-not [int]::TryParse($numberText, [ref]$number) -or $number -le 0) {
+                Show-ErrorMessage 'トラック番号には1以上の数字を入力してください。'
+                return $null
+            }
+            if ([string]::IsNullOrWhiteSpace($nameText)) {
+                Show-ErrorMessage '初期トラック名を入力してください。'
+                return $null
+            }
+            $names[[string]$number] = $nameText
+        }
+        return $names
+    }
+
+    function Save-EditingProfile {
+        $isCommon = $editor.Current -eq 0
+        if (-not $isCommon -and -not $editor.Profiles.ContainsKey($editor.Current)) {
+            return $true
+        }
+
+        $names = Read-NameGrid
+        if ($null -eq $names) {
+            return $false
+        }
+
+        $entry = @{ Names = $names; Suffix = ([string]$suffixText.Text).Trim() }
+        if ($isCommon) {
+            $editor.Common = $entry
+        }
+        else {
+            $editor.Profiles[$editor.Current] = $entry
+        }
+        return $true
+    }
+
+    function Show-EditingProfile {
+        $count = $editor.Current
+        $isCommon = $count -eq 0
+        $hasProfile = (-not $isCommon) -and $editor.Profiles.ContainsKey($count)
+        $editable = $isCommon -or $hasProfile
+
+        $editor.Suppress = $true
+        $profileCheck.Visible = -not $isCommon
+        $profileCheck.Checked = $hasProfile
+        $profileHint.Visible = $isCommon
+        $editor.Suppress = $false
+
+        if ($isCommon) {
+            $entry = $editor.Common
+        }
+        elseif ($hasProfile) {
+            $entry = $editor.Profiles[$count]
+        }
+        else {
+            $entry = @{ Names = (Get-InheritedNames $count); Suffix = [string]$editor.Common.Suffix }
+        }
+
+        $grid.Rows.Clear()
+        foreach ($key in (Get-SortedTrackNameKeys $entry.Names)) {
+            [void]$grid.Rows.Add($key, $entry.Names[$key])
+        }
+        $suffixText.Text = [string]$entry.Suffix
+
+        $textColor = if ($editable) { Get-UiColor 'Text' } else { Get-UiColor 'MutedText' }
+        $grid.ReadOnly = -not $editable
+        $grid.DefaultCellStyle.ForeColor = $textColor
+        $grid.AlternatingRowsDefaultCellStyle.ForeColor = $textColor
+        $suffixText.ReadOnly = -not $editable
+        $suffixText.ForeColor = $textColor
+        $addButton.Enabled = $editable
+        $deleteButton.Enabled = $editable
+        if ($grid.Rows.Count -gt 0) {
+            $grid.CurrentCell = $grid.Rows[0].Cells[1]
+        }
+    }
+
+    $profileCombo.Add_SelectedIndexChanged({
+        if ($editor.Suppress) {
+            return
+        }
+
+        $newIndex = $profileCombo.SelectedIndex
+        if (-not (Save-EditingProfile)) {
+            $editor.Suppress = $true
+            $profileCombo.SelectedIndex = $editor.CurrentIndex
+            $editor.Suppress = $false
+            return
+        }
+
+        $editor.CurrentIndex = $newIndex
+        $editor.Current = [int]$comboCounts[$newIndex]
+        Show-EditingProfile
+    })
+
+    $profileCheck.Add_CheckedChanged({
+        if ($editor.Suppress -or $editor.Current -eq 0) {
+            return
+        }
+
+        if ($profileCheck.Checked) {
+            $editor.Profiles[$editor.Current] = @{ Names = (Get-InheritedNames $editor.Current); Suffix = [string]$editor.Common.Suffix }
+        }
+        else {
+            [void]$editor.Profiles.Remove($editor.Current)
+        }
+        Update-ProfileItemTexts
+        Show-EditingProfile
+    })
 
     $addButton.Add_Click({
         $max = 0
@@ -1693,27 +2017,14 @@ function Show-SettingsDialog {
     })
 
     $okButton.Add_Click({
-        $grid.EndEdit()
-        $trackNames = @{}
-        foreach ($row in $grid.Rows) {
-            if ($row.IsNewRow) {
-                continue
-            }
-
-            $numberText = [string]$row.Cells[0].Value
-            $nameText = [string]$row.Cells[1].Value
-            $number = 0
-            if (-not [int]::TryParse($numberText, [ref]$number) -or $number -le 0) {
-                Show-ErrorMessage 'トラック番号には1以上の数字を入力してください。'
-                return
-            }
-            if ([string]::IsNullOrWhiteSpace($nameText)) {
-                Show-ErrorMessage '初期トラック名を入力してください。'
-                return
-            }
-            $trackNames[[string]$number] = $nameText
+        if (-not (Save-EditingProfile)) {
+            return
         }
 
+        $trackNames = @{}
+        foreach ($key in @($editor.Common.Names.Keys)) {
+            $trackNames[[string]$key] = [string]$editor.Common.Names[$key]
+        }
         if (-not $trackNames.ContainsKey('1')) {
             $trackNames['1'] = 'オンボーカル'
         }
@@ -1726,7 +2037,7 @@ function Show-SettingsDialog {
             $later = 'トラック'
         }
 
-        $suffix = [string]$suffixText.Text
+        $suffix = [string]$editor.Common.Suffix
         if ([string]::IsNullOrWhiteSpace($suffix)) {
             $suffix = '_mixed'
         }
@@ -1744,8 +2055,14 @@ function Show-SettingsDialog {
             return
         }
 
+        $profiles = @{}
+        foreach ($count in @($editor.Profiles.Keys)) {
+            $entry = $editor.Profiles[$count]
+            $profiles[[string]$count] = [PSCustomObject]@{ TrackNames = $entry.Names; OutputSuffix = [string]$entry.Suffix }
+        }
+
         $candidates = @(ConvertTo-TrackNameCandidateList -Candidates $candidateText.Lines)
-        $newSettings = ConvertTo-SavedSettings -TrackNames $trackNames -LaterName $later -OutputSuffix $suffix -TrackNameCandidates $candidates -DelayMode $delayMode -ReencodeBitrate $bitrate -OffsetStepMs $offsetStepMs -AutoOffsetAlways $autoOffsetCheck.Checked
+        $newSettings = ConvertTo-SavedSettings -TrackNames $trackNames -LaterName $later -OutputSuffix $suffix -TrackNameCandidates $candidates -DelayMode $delayMode -ReencodeBitrate $bitrate -OffsetStepMs $offsetStepMs -AutoOffsetAlways $autoOffsetCheck.Checked -TrackCountProfiles $profiles
         Save-Settings $newSettings
         $dialog.Tag = $newSettings
         $dialog.DialogResult = [System.Windows.Forms.DialogResult]::OK
@@ -1755,15 +2072,20 @@ function Show-SettingsDialog {
     $dialog.AcceptButton = $okButton
     $dialog.CancelButton = $cancelButton
     $dialog.Controls.AddRange(@(
-        $grid, $addButton, $deleteButton, $candidateLabel, $candidateText,
-        $laterLabel, $laterText, $suffixLabel, $suffixText,
+        $profileLabel, $profileCombo, $profileCheck, $profileHint,
+        $grid, $addButton, $deleteButton, $suffixLabel, $suffixText, $separator,
+        $candidateLabel, $candidateText, $laterLabel, $laterText,
         $delayModeLabel, $delayModeCombo, $bitrateLabel, $bitrateText,
         $offsetStepLabel, $offsetStepText, $autoOffsetCheck, $okButton, $cancelButton
     ))
 
-    if ($grid.Rows.Count -gt 0) {
-        $grid.CurrentCell = $grid.Rows[0].Cells[1]
+    $editor.Suppress = $true
+    foreach ($count in $comboCounts) {
+        [void]$profileCombo.Items.Add((Get-ProfileItemText ([int]$count)))
     }
+    $profileCombo.SelectedIndex = 0
+    $editor.Suppress = $false
+    Show-EditingProfile
 
     $result = $dialog.ShowDialog()
     if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
@@ -2113,17 +2435,31 @@ function Show-MainForm {
         }
     }
 
+    function Get-TrackRowCount {
+        return @($grid.Rows | Where-Object { -not $_.IsNewRow -and $null -ne $_.Tag }).Count
+    }
+
+    function Update-DefaultOutputPath {
+        $oldDefault = [string]$Script:DefaultOutputPath
+        $Script:DefaultOutputPath = Get-DefaultOutputPath -VideoFile $Script:VideoFile -Settings $Script:Settings -TrackCount (Get-TrackRowCount)
+        if ([string]::IsNullOrWhiteSpace([string]$outputText.Text) -or $outputText.Text -eq $oldDefault) {
+            $outputText.Text = $Script:DefaultOutputPath
+        }
+    }
+
     function Reset-GridFromInputs {
         $previousItems = @(Get-TrackItemsFromGrid -Grid $grid)
+        $includeVideoAudio = $useVideoAudio.Checked -and (Test-VideoSelected)
+        $trackCount = @($Script:AudioFiles).Count + $(if ($includeVideoAudio) { 1 } else { 0 })
         $items = @()
         $trackNumber = 1
-        if ($useVideoAudio.Checked -and (Test-VideoSelected)) {
-            $items += New-TrackItem -SourceFile $Script:VideoFile -IsVideoAudio $true -Title (Get-DefaultTrackName -Settings $Script:Settings -TrackIndex $trackNumber)
+        if ($includeVideoAudio) {
+            $items += New-TrackItem -SourceFile $Script:VideoFile -IsVideoAudio $true -Title (Get-DefaultTrackName -Settings $Script:Settings -TrackIndex $trackNumber -TrackCount $trackCount)
             $trackNumber++
         }
 
         foreach ($audioFile in $Script:AudioFiles) {
-            $items += New-TrackItem -SourceFile $audioFile -IsVideoAudio $false -Title (Get-DefaultTrackName -Settings $Script:Settings -TrackIndex $trackNumber)
+            $items += New-TrackItem -SourceFile $audioFile -IsVideoAudio $false -Title (Get-DefaultTrackName -Settings $Script:Settings -TrackIndex $trackNumber -TrackCount $trackCount)
             $trackNumber++
         }
         Copy-TrackOffsets -Items $items -SourceItems $previousItems
@@ -2151,7 +2487,7 @@ function Show-MainForm {
 
         if ($Enabled -and (Test-VideoSelected)) {
             if ($null -eq $videoItem) {
-                $videoItem = New-TrackItem -SourceFile $Script:VideoFile -IsVideoAudio $true -Title (Get-DefaultTrackName -Settings $Script:Settings -TrackIndex 1)
+                $videoItem = New-TrackItem -SourceFile $Script:VideoFile -IsVideoAudio $true -Title (Get-DefaultTrackName -Settings $Script:Settings -TrackIndex 1 -TrackCount ($audioItems.Count + 1))
             }
             else {
                 $videoItem.SourceFile = $Script:VideoFile
@@ -2165,6 +2501,7 @@ function Show-MainForm {
 
         Set-TrackItemsToGrid -Grid $grid -Items $items
         Sync-AudioFilesFromGrid -Grid $grid
+        Update-DefaultOutputPath
     }
 
     function Update-VideoAudioRows {
@@ -2279,15 +2616,9 @@ function Show-MainForm {
             throw '動画ファイルには存在する .mp4 ファイルを指定してください。'
         }
 
-        $oldDefault = [string]$Script:DefaultOutputPath
         $Script:VideoFile = [System.IO.Path]::GetFullPath($VideoFile)
         $videoText.Text = $Script:VideoFile
         $useVideoAudio.Enabled = $true
-        $Script:DefaultOutputPath = Get-DefaultOutputPath -VideoFile $Script:VideoFile -Settings $Script:Settings
-
-        if ([string]::IsNullOrWhiteSpace([string]$outputText.Text) -or $outputText.Text -eq $oldDefault) {
-            $outputText.Text = $Script:DefaultOutputPath
-        }
 
         foreach ($row in $grid.Rows) {
             if (-not $row.IsNewRow -and $null -ne $row.Tag) {
@@ -2295,6 +2626,7 @@ function Show-MainForm {
             }
         }
         Update-VideoAudioRows
+        Update-DefaultOutputPath
         Request-AutoOffset
     }
 
@@ -2829,6 +3161,7 @@ function Show-MainForm {
                 if ($addedCount -gt 0) {
                     Request-AutoOffset -Rows @($grid.Rows | Select-Object -Last $addedCount)
                 }
+                Update-DefaultOutputPath
                 return
             }
 
@@ -2924,6 +3257,7 @@ function Show-MainForm {
             else {
                 Request-AutoOffset -Rows @($grid.Rows | Select-Object -Last $addedCount)
             }
+            Update-DefaultOutputPath
         }
     })
 
@@ -2955,6 +3289,7 @@ function Show-MainForm {
             $grid.Rows.RemoveAt($rowIndex)
             Update-TrackNumbers -Grid $grid
         }
+        Update-DefaultOutputPath
 
         if ($grid.Rows.Count -gt 0) {
             $newIndex = [Math]::Min($rowIndex, $grid.Rows.Count - 1)
@@ -2990,16 +3325,11 @@ function Show-MainForm {
 
     $settingsButton.Add_Click({
         Complete-TrackNameEdit -Grid $grid -TrackNameColumnIndex $trackNameColumnIndex
-        $oldDefault = $Script:DefaultOutputPath
         $oldSettings = $Script:Settings
         $Script:Settings = Show-SettingsDialog -CurrentSettings $Script:Settings
         Set-TrackNameCandidateColumnItems -Grid $grid -Settings $Script:Settings
         Update-OffsetStepButtons
-        $Script:DefaultOutputPath = Get-DefaultOutputPath -VideoFile $Script:VideoFile -Settings $Script:Settings
-
-        if ($outputText.Text -eq $oldDefault) {
-            $outputText.Text = $Script:DefaultOutputPath
-        }
+        Update-DefaultOutputPath
 
         if (-not (Test-TrackNameDefaultsChanged -OldSettings $oldSettings -NewSettings $Script:Settings)) {
             return
