@@ -31,10 +31,13 @@ $Script:SettingsFileName = 'mixtrack_ffmpeg_gui.settings.json'
 $Script:LauncherName = 'PitaTrack.exe'
 $Script:IconFileName = 'pitatrack.ico'
 
-# ダウンロードする ffmpeg（gyan.dev の essentials ビルド）。版を上げるときは URL と SHA256 を一緒に変えます。
-$Script:FfmpegUrl = 'https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/ffmpeg-9.0.2-essentials_build.zip'
-$Script:FfmpegSha256 = '60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba'
-$Script:FfmpegSizeText = '約110MB'
+# ダウンロードする ffmpeg（dev\ffmpeg-lgpl でビルドした LGPL 版。GitHub Release の ffmpeg-<版>-pitatrack<番号>）。
+# 版を上げるときは、その Release の zip の URL と SHA256（Release の SHA256SUMS.txt）を一緒に変えます。
+$Script:FfmpegUrl = 'https://github.com/bee7813993/ffmpegMp4Mix/releases/download/ffmpeg-9.0.2-pitatrack1/ffmpeg-9.0.2-pitatrack1-lgpl-win64.zip'
+$Script:FfmpegSha256 = '34e93b6949d16ac109b15abf93826fc5f4af6fdf51a8d469a16eadec49d90eae'
+$Script:FfmpegSizeText = '約2MB'
+# ffmpeg.exe と一緒に取り出すライセンスのファイル（LGPL の全文、ソースの場所、ビルドの指定）を置く tools の下のフォルダー
+$Script:FfmpegLicenseDirName = 'ffmpeg-licenses'
 
 $Script:ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Script:SourceRoot = Split-Path -Parent $Script:ScriptDir
@@ -212,15 +215,21 @@ function Copy-AppFiles {
         }
     }
 
+    # 設定と ffmpeg.exe は、すでにあるものを残す。ffmpeg のライセンスのファイルも ffmpeg.exe に合わせて残す
+    $keepFfmpeg = Test-Path -LiteralPath (Join-Path $destination 'tools\ffmpeg.exe')
+    $ffmpegLicensePrefix = 'tools\' + $Script:FfmpegLicenseDirName + '\'
     foreach ($file in $files) {
         # 起動用ファイルはコピーせず、インストール先で作り直す
         if ($file.Name.StartsWith('.') -or $file.Name -in @('ffplay.exe', 'ffprobe.exe', $Script:LauncherName)) {
             continue
         }
 
-        $target = Join-Path $destination $file.FullName.Substring($source.Length + 1)
-        # 設定と ffmpeg.exe は、すでにあるものを残す
+        $relativePath = $file.FullName.Substring($source.Length + 1)
+        $target = Join-Path $destination $relativePath
         if ($file.Name -in @($Script:SettingsFileName, 'ffmpeg.exe') -and (Test-Path -LiteralPath $target)) {
+            continue
+        }
+        if ($keepFfmpeg -and $relativePath.StartsWith($ffmpegLicensePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
             continue
         }
 
@@ -451,9 +460,22 @@ function Expand-FfmpegExe {
     $partPath = Join-Path $TargetToolsDir 'ffmpeg.exe.part'
     $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
     try {
-        $entry = $archive.Entries | Where-Object { $_.FullName -match '(^|[\\/])bin[\\/]ffmpeg\.exe$' } | Select-Object -First 1
+        $entry = $archive.Entries | Where-Object { $_.Name -eq 'ffmpeg.exe' } | Select-Object -First 1
         if ($null -eq $entry) {
             throw 'ダウンロードしたファイルに ffmpeg.exe が入っていません。'
+        }
+
+        # ffmpeg.exe と同じフォルダーのファイル（ライセンスなど）を先に置き、ffmpeg.exe だけが残ることがないようにする
+        $folder = $entry.FullName.Substring(0, $entry.FullName.Length - $entry.Name.Length)
+        $licenseDir = Join-Path $TargetToolsDir $Script:FfmpegLicenseDirName
+        if (Test-Path -LiteralPath $licenseDir) {
+            Remove-Item -LiteralPath $licenseDir -Recurse -Force
+        }
+        foreach ($item in @($archive.Entries | Where-Object { $_.Name -ne '' -and $_.Name -ne 'ffmpeg.exe' -and $_.FullName -eq ($folder + $_.Name) })) {
+            if (-not (Test-Path -LiteralPath $licenseDir)) {
+                New-Item -ItemType Directory -Path $licenseDir -Force | Out-Null
+            }
+            [System.IO.Compression.ZipFileExtensions]::ExtractToFile($item, (Join-Path $licenseDir $item.Name), $true)
         }
 
         $source = $entry.Open()

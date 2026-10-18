@@ -62,6 +62,7 @@ PitaTrack\
   README.md
   tools\
     ffmpeg.exe               Downloaded by setup or on first launch
+    ffmpeg-licenses\         ffmpeg license and source location (downloaded with ffmpeg.exe)
     mixtrack_ffmpeg_gui.ps1
     mixtrack_ffmpeg_gui.settings.json
     pitatrack.ico            Icon
@@ -92,7 +93,7 @@ PitaTrack\
 
 That's all.
 
-- `ffmpeg`, which is needed to create MP4 files, is downloaded automatically (about 110 MB). You do not need to get it yourself.
+- `ffmpeg`, which is needed to create MP4 files, is downloaded automatically (about 2 MB). You do not need to get it yourself.
 - No administrator rights are needed. The tool is installed to `%LOCALAPPDATA%\Programs\PitaTrack`.
 - "ぴたトラック" is added to **Send To**, the desktop, and the Start menu. You can choose which ones in the setup window.
 - After installation, you can delete the extracted folder and the ZIP file.
@@ -494,7 +495,9 @@ This tool is intended for users who previously used tools such as `L-SMASH Muxer
 
 PitaTrack was formerly called ffmpegMp4Mix.
 
-The ffmpeg downloaded by setup and the download window is the [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) Windows build (essentials, GPL). It is downloaded from the [files published on GitHub](https://github.com/GyanD/codexffmpeg/releases), checked with SHA256, and then `ffmpeg.exe` is extracted.
+The ffmpeg downloaded by setup and the download window is built from the official FFmpeg 9.0.2 source with only the components PitaTrack uses, under the LGPL ([ffmpeg-9.0.2-pitatrack1](https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack1)). This software uses code of FFmpeg licensed under the LGPLv2.1 and its source can be downloaded from the same release. The downloaded zip is checked with SHA256, and then `ffmpeg.exe` and the license files (`tools\ffmpeg-licenses`) are extracted.
+
+This ffmpeg leaves out what PitaTrack does not use, such as video re-encoding, `ffprobe`, and `ffplay`. If you want an ffmpeg for other uses too, you can put one from [ffmpeg.org](https://ffmpeg.org/download.html) in the `tools` folder. An ffmpeg downloaded by an earlier PitaTrack version (the gyan.dev build) is kept and used as is when you update.
 
 ## Building the Release ZIP (for Developers)
 
@@ -506,9 +509,9 @@ This creates `dist\PitaTrack_vX.Y.Z.zip`.
 
 - The version is read from `$Script:AppVersion` in `tools\setup.ps1`. Update it before a release.
 - Only files tracked by git are included (the `dev` folder and `ffmpeg.exe` are not). Run `git add` for new files first.
-- To change the ffmpeg version that is downloaded, change `$Script:FfmpegUrl` and `$Script:FfmpegSha256` in `tools\setup.ps1` together.
+- To change the ffmpeg version that is downloaded, first create a new release as described in [dev/ffmpeg-lgpl/README.md](dev/ffmpeg-lgpl/README.md), then put the URL and SHA256 of its zip (from the release's `SHA256SUMS.txt`) in `$Script:FfmpegUrl` and `$Script:FfmpegSha256` in `tools\setup.ps1`.
 - The icon is `tools\pitatrack.ico`. If you replace it, the next installation (or `tools\makesendto` run) uses it for `PitaTrack.exe`, the shortcuts, and the windows.
 
-## The ffmpeg Bundled with the Store Version (for Developers)
+## The ffmpeg for PitaTrack (for Developers)
 
-The `ffmpeg.exe` bundled with the Store (MSIX) version is built from the official FFmpeg source with LGPL components only (the "FFmpeg LGPL build" GitHub Actions workflow). See [dev/ffmpeg-lgpl/README.md](dev/ffmpeg-lgpl/README.md) (in Japanese) for how it is built, tested, and published to GitHub Releases, and for the license notice drafts.
+The `ffmpeg.exe` that the ZIP version's setup downloads and the Store (MSIX) version bundles is built from the official FFmpeg source with LGPL components only (the "FFmpeg LGPL build" GitHub Actions workflow). See [dev/ffmpeg-lgpl/README.md](dev/ffmpeg-lgpl/README.md) (in Japanese) for how it is built, tested, and published to GitHub Releases, and for the license notice drafts.

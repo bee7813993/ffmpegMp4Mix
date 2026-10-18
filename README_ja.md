@@ -62,6 +62,7 @@ PitaTrack\
   README.md
   tools\
     ffmpeg.exe               セットアップか初回起動時にダウンロード
+    ffmpeg-licenses\         ffmpeg のライセンスとソースの場所（ffmpeg.exe と一緒にダウンロード）
     mixtrack_ffmpeg_gui.ps1
     mixtrack_ffmpeg_gui.settings.json
     pitatrack.ico            アイコン
@@ -92,7 +93,7 @@ PitaTrack\
 
 これで使えるようになります。
 
-- ffmpeg（MP4を作るのに必要なソフト）は自動でダウンロードされます（約110MB）。自分で用意する必要はありません。
+- ffmpeg（MP4を作るのに必要なソフト）は自動でダウンロードされます（約2MB）。自分で用意する必要はありません。
 - 管理者権限は不要です。インストール先は `%LOCALAPPDATA%\Programs\PitaTrack` です。
 - 右クリックの **送る**、デスクトップ、スタートメニューに「ぴたトラック」が追加されます。追加するものはインストール画面で選べます。
 - インストールが終わったら、展開したフォルダーとZIPファイルは削除してかまいません。
@@ -494,7 +495,9 @@ MPC-BE 1.5で重複表示される場合は、`MPCBE15_COMPAT_MODE=1` を試し�
 
 ぴたトラックは、以前は ffmpegMp4Mix という名前でした。
 
-セットアップやダウンロード画面で取得する ffmpeg は、[gyan.dev](https://www.gyan.dev/ffmpeg/builds/) のWindows用ビルド（essentials、GPL）です。[GitHub上の配布ファイル](https://github.com/GyanD/codexffmpeg/releases)をダウンロードし、SHA256で内容を確認してから `ffmpeg.exe` を取り出します。
+セットアップやダウンロード画面で取得する ffmpeg は、FFmpeg 9.0.2 の公式のソースから、ぴたトラックが使う部品だけを LGPL でビルドしたものです（[ffmpeg-9.0.2-pitatrack1](https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack1)）。このソフトウェアは LGPLv2.1 でライセンスされた FFmpeg のコードを使っています。ソースは同じ Release からダウンロードできます。ダウンロードした zip は SHA256 で内容を確認してから、`ffmpeg.exe` と、ライセンスのファイル（`tools\ffmpeg-licenses`）を取り出します。
+
+この ffmpeg には、ぴたトラックが使わない機能（映像の再エンコード、`ffprobe` や `ffplay` など）は入っていません。ほかの用途にも使う ffmpeg が欲しい場合は、[ffmpeg.org](https://ffmpeg.org/download.html) から入手したものを `tools` フォルダーに置いてもかまいません。以前の版のぴたトラックでダウンロードした ffmpeg（gyan.dev のビルド）は、更新しても入れ替えずにそのまま使います。
 
 ## 配布ZIPの作り方（開発者向け）
 
@@ -506,9 +509,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File dev\build_release.ps1
 
 - 版は `tools\setup.ps1` の `$Script:AppVersion` から読み取ります。リリース前にここを更新してください。
 - gitで管理しているファイルだけを入れます（`dev` フォルダーと `ffmpeg.exe` は入りません）。新しく追加したファイルは、先に `git add` してください。
-- ダウンロードする ffmpeg の版を変えるときは、`tools\setup.ps1` の `$Script:FfmpegUrl` と `$Script:FfmpegSha256` を一緒に変えます。
+- ダウンロードする ffmpeg の版を変えるときは、先に [dev/ffmpeg-lgpl/README.md](dev/ffmpeg-lgpl/README.md) の手順で新しい Release を作り、その zip の URL と SHA256（Release の `SHA256SUMS.txt`）を `tools\setup.ps1` の `$Script:FfmpegUrl` と `$Script:FfmpegSha256` に入れます。
 - アイコンは `tools\pitatrack.ico` です。差し替えると、次のインストール（または `tools\makesendto` の実行）から、`PitaTrack.exe`・ショートカット・画面のアイコンに反映されます。
 
-## Store 版に同梱する ffmpeg（開発者向け）
+## ぴたトラック用の ffmpeg（開発者向け）
 
-Store 版（MSIX）に同梱する `ffmpeg.exe` は、FFmpeg 公式のソースから LGPL の部品だけでビルドします（GitHub Actions の「FFmpeg LGPL build」）。作り方、確かめ方、GitHub Release への置き方、ライセンス表示の文案は [dev/ffmpeg-lgpl/README.md](dev/ffmpeg-lgpl/README.md) にあります。
+ZIP 版のセットアップがダウンロードし、Store 版（MSIX）に同梱する `ffmpeg.exe` は、FFmpeg 公式のソースから LGPL の部品だけでビルドします（GitHub Actions の「FFmpeg LGPL build」）。作り方、確かめ方、GitHub Release への置き方、ライセンス表示の文案は [dev/ffmpeg-lgpl/README.md](dev/ffmpeg-lgpl/README.md) にあります。

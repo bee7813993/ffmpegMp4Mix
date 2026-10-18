@@ -3,3 +3,4 @@ tools/ffplay.exe
 tools/ffprobe.exe
 dist/
 build/
+tools/ffmpeg-licenses/

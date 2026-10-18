@@ -1,6 +1,6 @@
-# Store 版に同梱する ffmpeg.exe（FFmpeg の LGPL ビルド）
+# ぴたトラック用の ffmpeg.exe（FFmpeg の LGPL ビルド）
 
-Store 版（MSIX）のぴたトラックに同梱する `ffmpeg.exe` を、FFmpeg 公式のソースから LGPL の部品だけでビルドする仕組みです。ZIP 版の `tools\setup.ps1` がダウンロードする gyan.dev のビルド（GPLv3、外部ライブラリ入り）は、同梱して配るには GPL の対応するソース一式が必要になるため使いません。
+Store 版（MSIX）のぴたトラックに同梱し、ZIP 版の `tools\setup.ps1` がダウンロードする `ffmpeg.exe` を、FFmpeg 公式のソースから LGPL の部品だけでビルドする仕組みです。以前 ZIP 版が使っていた gyan.dev のビルド（GPLv3、外部ライブラリ入り）は、同梱して配るには GPL の対応するソース一式が必要になるため使いません。
 
 - FFmpeg 9.0.2 の公式ソース（`ffmpeg-9.0.2.tar.xz`）を、固定した SHA256 と FFmpeg の署名で確かめてから使います。ソースには手を加えません。
 - `--enable-gpl` と `--enable-nonfree` を付けず、外部のライブラリも使いません。`--disable-everything` から、ぴたトラックが使う部品だけを足します。
@@ -125,3 +125,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File dev\ffmpeg-lgpl\test_pitatra
 2. プルリクエストを作り、ワークフローが緑になることを確かめる。configure で部品の名前が変わっていれば、build.sh がその名前を示して止まる
 3. まとめた MP4 を MPC-BE などで再生し、遅らせる・早めるの結果を耳で確かめる（コピーで遅らせる方法は、ffmpeg が MP4 に書く編集リストにプレーヤーが従うことが前提）
 4. タグ `ffmpeg-<版>-pitatrack<番号>` を push して Release を作り、ライセンス表示の URL をその Release に変える
+5. `tools\setup.ps1` の `$Script:FfmpegUrl` と `$Script:FfmpegSha256` を、新しい Release の `ffmpeg-<版>-pitatrack<番号>-lgpl-win64.zip` の URL と SHA256（Release の `SHA256SUMS.txt`）に変え、README の Release へのリンクも変える
