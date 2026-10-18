@@ -3999,9 +3999,11 @@ public static class AudioOffsetAnalyzer
             onset[i] = low[i] + full[i];
         }
 
+        int searchStart = Math.Max(-maxLag, minOverlap - reference.OnsetLow.Length) + maxLag;
+        int searchEnd = Math.Min(maxLag, track.OnsetLow.Length - minOverlap) + maxLag + 1;
         int exclusion = (int)(500.0 / FrameMs);
         int refineRadius = (int)(60.0 / FrameMs);
-        List<int> peaks = TopPeaks(combined, 3, exclusion);
+        List<int> peaks = TopPeaks(combined, searchStart, searchEnd, 3, exclusion);
         AudioOffsetResult result = new AudioOffsetResult();
         int chosenPeak = peaks[0];
         double chosenLagMs = 0;
@@ -4010,7 +4012,7 @@ public static class AudioOffsetAnalyzer
         for (int p = 0; p < peaks.Count; p++)
         {
             int peak = peaks[p];
-            int refined = ArgMax(onset, Math.Max(0, peak - refineRadius), Math.Min(onset.Length, peak + refineRadius + 1));
+            int refined = ArgMax(onset, Math.Max(searchStart, peak - refineRadius), Math.Min(searchEnd, peak + refineRadius + 1));
             double coarseLagMs = (refined - maxLag + ParabolicPeak(onset, refined)) * FrameMs;
             if (p == 0)
             {
@@ -4107,13 +4109,13 @@ public static class AudioOffsetAnalyzer
         return result;
     }
 
-    static List<int> TopPeaks(double[] values, int count, int separation)
+    static List<int> TopPeaks(double[] values, int start, int end, int count, int separation)
     {
         List<int> candidates = new List<int>();
-        for (int i = 0; i < values.Length; i++)
+        for (int i = start; i < end; i++)
         {
-            double left = i > 0 ? values[i - 1] : double.MinValue;
-            double right = i < values.Length - 1 ? values[i + 1] : double.MinValue;
+            double left = i > start ? values[i - 1] : double.MinValue;
+            double right = i < end - 1 ? values[i + 1] : double.MinValue;
             if (values[i] >= left && values[i] > right)
             {
                 candidates.Add(i);
@@ -4144,7 +4146,7 @@ public static class AudioOffsetAnalyzer
         }
         if (peaks.Count == 0)
         {
-            peaks.Add(ArgMax(values, 0, values.Length));
+            peaks.Add(ArgMax(values, start, end));
         }
         return peaks;
     }
@@ -4429,6 +4431,8 @@ public static class AudioOffsetAnalyzer
         {
             size <<= 1;
         }
+        int lowestLag = Math.Max(-maxLag, 1 - lengthA);
+        int highestLag = Math.Min(maxLag, lengthB - 1);
 
         for (int d = 0; d < a.Length; d++)
         {
@@ -4448,7 +4452,7 @@ public static class AudioOffsetAnalyzer
                 aIm[k] = im;
             }
             Fft(aRe, aIm, true);
-            for (int lag = -maxLag; lag <= maxLag; lag++)
+            for (int lag = lowestLag; lag <= highestLag; lag++)
             {
                 cross[lag + maxLag] += aRe[(lag + size) % size];
             }
