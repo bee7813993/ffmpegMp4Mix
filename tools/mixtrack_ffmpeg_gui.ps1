@@ -589,15 +589,58 @@ function New-TrackItem {
         [string]$SourceFile,
         [bool]$IsVideoAudio,
         [string]$Title,
-        [int]$OffsetMs = 0
+        [int]$OffsetMs = 0,
+        [string]$OffsetNote = '',
+        [string]$OffsetNoteLevel = ''
     )
 
     [PSCustomObject]@{
-        SourceFile   = $SourceFile
-        IsVideoAudio = $IsVideoAudio
-        Title        = $Title
-        OffsetMs     = $OffsetMs
-        InputIndex   = $null
+        SourceFile      = $SourceFile
+        IsVideoAudio    = $IsVideoAudio
+        Title           = $Title
+        OffsetMs        = $OffsetMs
+        OffsetNote      = $OffsetNote
+        OffsetNoteLevel = $OffsetNoteLevel
+        InputIndex      = $null
+    }
+}
+
+function Format-AutoOffsetNote {
+    param([object]$Result)
+
+    $offsetText = (Format-OffsetMs ([int]$Result.OffsetMs)) + 'ms'
+    switch ([string]$Result.Level) {
+        '高' { $note = "自動調整: ${offsetText}（信頼度: 高）" }
+        '中' { $note = "自動調整: ${offsetText}（信頼度: 中）。念のため確認してください。" }
+        default { $note = "自動調整: 判定できなかったため変更していません（候補: ${offsetText}、信頼度: 低）。" }
+    }
+    if ($Result.EdgeWarning) {
+        $note += "`r`nずれが探せる範囲（±180秒）を超えている可能性があります。"
+    }
+    if ($Result.DriftWarning) {
+        $note += "`r`n" + ('テンポか長さが違う可能性があります（曲の途中で最大 {0:0}ms ずれます）。' -f $Result.DriftMs)
+    }
+    return $note
+}
+
+function Set-OffsetCellNote {
+    param(
+        [System.Windows.Forms.DataGridViewRow]$Row,
+        [string]$Note,
+        [string]$NoteLevel
+    )
+
+    $cell = $Row.Cells[2]
+    $cell.ToolTipText = $Note
+    switch ($NoteLevel) {
+        'warn' { $cell.Style.BackColor = Get-UiColor 'WarningSoft' }
+        'error' { $cell.Style.BackColor = Get-UiColor 'DangerSoft' }
+        default { $cell.Style.BackColor = [System.Drawing.Color]::Empty }
+    }
+
+    if ($null -ne $Row.Tag) {
+        $Row.Tag.OffsetNote = $Note
+        $Row.Tag.OffsetNoteLevel = $NoteLevel
     }
 }
 
@@ -618,6 +661,8 @@ function Copy-TrackOffsets {
             if ([bool]$sourceItem.IsVideoAudio -eq [bool]$item.IsVideoAudio -and
                 ([string]$sourceItem.SourceFile).Equals([string]$item.SourceFile, [System.StringComparison]::OrdinalIgnoreCase)) {
                 $item.OffsetMs = [int]$sourceItem.OffsetMs
+                $item.OffsetNote = [string]$sourceItem.OffsetNote
+                $item.OffsetNoteLevel = [string]$sourceItem.OffsetNoteLevel
                 $remaining.RemoveAt($index)
                 break
             }
@@ -673,6 +718,7 @@ function Get-UiColor {
         'AccentSoft' { return (New-UiColor 219 234 254) }
         'Danger' { return (New-UiColor 220 38 38) }
         'DangerSoft' { return (New-UiColor 254 242 242) }
+        'WarningSoft' { return (New-UiColor 255 247 214) }
         default { return (New-UiColor 255 255 255) }
     }
 }
@@ -1004,6 +1050,7 @@ function Add-TrackRow {
     $rowIndex = $Grid.Rows.Add('', $Item.Title, (Format-OffsetMs ([int]$Item.OffsetMs)), (Get-TrackTypeText $Item), (Get-TrackSourceText $Item))
     $Grid.Rows[$rowIndex].Cells[4].ToolTipText = [string]$Item.SourceFile
     $Grid.Rows[$rowIndex].Tag = $Item
+    Set-OffsetCellNote -Row $Grid.Rows[$rowIndex] -Note ([string]$Item.OffsetNote) -NoteLevel ([string]$Item.OffsetNoteLevel)
 }
 
 function Get-TrackItemsFromGrid {
@@ -1031,7 +1078,9 @@ function Get-TrackItemsFromGrid {
             -SourceFile ([string]$tag.SourceFile) `
             -IsVideoAudio ([bool]$tag.IsVideoAudio) `
             -Title ([string]$row.Cells[1].Value) `
-            -OffsetMs $offsetMs
+            -OffsetMs $offsetMs `
+            -OffsetNote ([string]$tag.OffsetNote) `
+            -OffsetNoteLevel ([string]$tag.OffsetNoteLevel)
     }
     return $items
 }
@@ -1771,6 +1820,13 @@ function Show-MainForm {
     $allOffsetApplyButton.TabIndex = 13
     Set-ButtonTheme -Button $allOffsetApplyButton
 
+    $autoOffsetButton = New-Object System.Windows.Forms.Button
+    $autoOffsetButton.Text = '自動調整'
+    $autoOffsetButton.Location = New-Object System.Drawing.Point(610, 74)
+    $autoOffsetButton.Size = New-Object System.Drawing.Size(80, 28)
+    $autoOffsetButton.TabIndex = 14
+    Set-ButtonTheme -Button $autoOffsetButton
+
     $grid = New-Object TrackNameDataGridView
     $grid.Location = New-Object System.Drawing.Point(12, 108)
     $grid.Size = New-Object System.Drawing.Size(730, 296)
@@ -1869,7 +1925,7 @@ function Show-MainForm {
     $outputText.Location = New-Object System.Drawing.Point(88, 417)
     $outputText.Size = New-Object System.Drawing.Size(654, 22)
     $outputText.Anchor = 'Left,Right,Bottom'
-    $outputText.TabIndex = 14
+    $outputText.TabIndex = 15
     Set-TextBoxTheme -TextBox $outputText
 
     $browseButton = New-Object System.Windows.Forms.Button
@@ -1877,7 +1933,7 @@ function Show-MainForm {
     $browseButton.Location = New-Object System.Drawing.Point(754, 414)
     $browseButton.Size = New-Object System.Drawing.Size(94, 28)
     $browseButton.Anchor = 'Right,Bottom'
-    $browseButton.TabIndex = 15
+    $browseButton.TabIndex = 16
     Set-ButtonTheme -Button $browseButton
 
     $settingsButton = New-Object System.Windows.Forms.Button
@@ -1885,7 +1941,7 @@ function Show-MainForm {
     $settingsButton.Location = New-Object System.Drawing.Point(12, 484)
     $settingsButton.Size = New-Object System.Drawing.Size(94, 30)
     $settingsButton.Anchor = 'Left,Bottom'
-    $settingsButton.TabIndex = 16
+    $settingsButton.TabIndex = 17
     Set-ButtonTheme -Button $settingsButton
 
     $statusLabel = New-Object System.Windows.Forms.Label
@@ -1900,7 +1956,7 @@ function Show-MainForm {
     $okButton.Location = New-Object System.Drawing.Point(656, 484)
     $okButton.Size = New-Object System.Drawing.Size(92, 30)
     $okButton.Anchor = 'Right,Bottom'
-    $okButton.TabIndex = 17
+    $okButton.TabIndex = 18
     Set-ButtonTheme -Button $okButton -Kind Primary
 
     $cancelButton = New-Object System.Windows.Forms.Button
@@ -1908,7 +1964,7 @@ function Show-MainForm {
     $cancelButton.Location = New-Object System.Drawing.Point(756, 484)
     $cancelButton.Size = New-Object System.Drawing.Size(92, 30)
     $cancelButton.Anchor = 'Right,Bottom'
-    $cancelButton.TabIndex = 18
+    $cancelButton.TabIndex = 19
     $cancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     Set-ButtonTheme -Button $cancelButton
 
@@ -1920,6 +1976,9 @@ function Show-MainForm {
     $sourceColumnIndex = 4
     $offsetErrorMessage = 'オフセットは整数（ミリ秒）で入力してください。元の値に戻しました。'
     $allOffsetErrorMessage = '全トラックをずらす量は整数（ミリ秒）で入力してください。'
+    $autoOffsetState = [PSCustomObject]@{
+        Running = $false
+    }
     $trackDragState = [PSCustomObject]@{
         RowIndex = -1
         Box = [System.Drawing.Rectangle]::Empty
@@ -1936,6 +1995,7 @@ function Show-MainForm {
         $offsetToolTip.SetToolTip($allOffsetMinusButton, "全トラックを ${stepMs}ms 早める (Ctrl+Shift+↓)")
         $offsetToolTip.SetToolTip($allOffsetPlusButton, "全トラックを ${stepMs}ms 遅らせる (Ctrl+Shift+↑)")
         $offsetToolTip.SetToolTip($allOffsetText, '全トラックをずらす量（ミリ秒）。+ で遅らせる、- で早める')
+        $offsetToolTip.SetToolTip($autoOffsetButton, '動画の音声と聞き比べて、各トラックのオフセットを自動で合わせます')
     }
 
     function Step-TrackOffsets {
@@ -1994,6 +2054,7 @@ function Show-MainForm {
             $offsetMs += $DeltaMs
             $row.Cells[$offsetColumnIndex].Value = Format-OffsetMs $offsetMs
             $row.Tag.OffsetMs = $offsetMs
+            Set-OffsetCellNote -Row $row -Note '' -NoteLevel ''
         }
 
         if ($statusLabel.Text -eq $offsetErrorMessage -or $statusLabel.Text -eq $allOffsetErrorMessage) {
@@ -2177,7 +2238,107 @@ function Show-MainForm {
             $outputText.Text = $Script:DefaultOutputPath
         }
 
+        foreach ($row in $grid.Rows) {
+            if (-not $row.IsNewRow -and $null -ne $row.Tag) {
+                Set-OffsetCellNote -Row $row -Note '' -NoteLevel ''
+            }
+        }
         Update-VideoAudioRows
+    }
+
+    function Invoke-AutoOffset {
+        Complete-TrackNameEdit -Grid $grid -TrackNameColumnIndex $trackNameColumnIndex
+        if (-not (Test-VideoSelected) -or -not (Test-Path -LiteralPath $Script:VideoFile -PathType Leaf)) {
+            Show-ErrorMessage '動画ファイルを指定してください。'
+            return
+        }
+
+        $ffmpegPath = Get-SupportFilePath -FileName 'ffmpeg.exe'
+        if (-not (Test-Path -LiteralPath $ffmpegPath)) {
+            Show-ErrorMessage "ffmpeg.exe が見つかりません。`r`n$ffmpegPath"
+            return
+        }
+
+        $rows = @($grid.Rows | Where-Object { -not $_.IsNewRow -and $null -ne $_.Tag -and -not [bool]$_.Tag.IsVideoAudio })
+        if ($rows.Count -eq 0) {
+            Show-ErrorMessage '自動調整するトラックがありません。'
+            return
+        }
+
+        $disabledControls = @($form.Controls | Where-Object { $_.Enabled -and -not ($_ -is [System.Windows.Forms.Label]) })
+        foreach ($control in $disabledControls) {
+            $control.Enabled = $false
+        }
+        $autoOffsetState.Running = $true
+        $form.UseWaitCursor = $true
+        $applied = 0
+        $needsCheck = 0
+        $unchanged = 0
+        try {
+            $statusLabel.Text = '自動調整中: 動画の音声を解析しています...'
+            [System.Windows.Forms.Application]::DoEvents()
+            try {
+                $reference = [AudioOffsetAnalyzer]::Load($ffmpegPath, $Script:VideoFile)
+            }
+            catch {
+                $statusLabel.Text = ''
+                Show-ErrorMessage ("動画の音声を解析できませんでした。`r`n`r`n" + $_.Exception.GetBaseException().Message)
+                return
+            }
+
+            for ($index = 0; $index -lt $rows.Count; $index++) {
+                $row = $rows[$index]
+                $sourceFile = [string]$row.Tag.SourceFile
+                $statusLabel.Text = '自動調整中 ({0}/{1}): {2}' -f ($index + 1), $rows.Count, [System.IO.Path]::GetFileName($sourceFile)
+                [System.Windows.Forms.Application]::DoEvents()
+
+                try {
+                    $result = [AudioOffsetAnalyzer]::Analyze($reference, [AudioOffsetAnalyzer]::Load($ffmpegPath, $sourceFile))
+                }
+                catch {
+                    Set-OffsetCellNote -Row $row -Note ('自動調整できませんでした: ' + $_.Exception.GetBaseException().Message) -NoteLevel 'error'
+                    $unchanged++
+                    continue
+                }
+
+                $note = Format-AutoOffsetNote $result
+                if ($result.Level -eq '低') {
+                    Set-OffsetCellNote -Row $row -Note $note -NoteLevel 'error'
+                    $unchanged++
+                    continue
+                }
+
+                $row.Cells[$offsetColumnIndex].Value = Format-OffsetMs ([int]$result.OffsetMs)
+                $row.Tag.OffsetMs = [int]$result.OffsetMs
+                if ($result.Level -eq '高' -and -not $result.DriftWarning) {
+                    Set-OffsetCellNote -Row $row -Note $note -NoteLevel ''
+                }
+                else {
+                    Set-OffsetCellNote -Row $row -Note $note -NoteLevel 'warn'
+                    $needsCheck++
+                }
+                $applied++
+            }
+
+            $parts = @('{0}件調整' -f $applied)
+            if ($needsCheck -gt 0) {
+                $parts += '{0}件は要確認' -f $needsCheck
+            }
+            if ($unchanged -gt 0) {
+                $parts += '{0}件は変更なし' -f $unchanged
+            }
+            $statusLabel.Text = '自動調整: ' + ($parts -join ' / ')
+            if ($needsCheck + $unchanged -gt 0) {
+                $statusLabel.Text += '（色付きのセルにマウスで詳細）'
+            }
+        }
+        finally {
+            $form.UseWaitCursor = $false
+            $autoOffsetState.Running = $false
+            foreach ($control in $disabledControls) {
+                $control.Enabled = $true
+            }
+        }
     }
 
     function Get-DraggedTrackInfo {
@@ -2427,6 +2588,7 @@ function Show-MainForm {
                 $_.Value = Format-OffsetMs $offsetMs
                 if ($null -ne $offsetRow.Tag) {
                     $offsetRow.Tag.OffsetMs = $offsetMs
+                    Set-OffsetCellNote -Row $offsetRow -Note '' -NoteLevel ''
                 }
                 if ($statusLabel.Text -eq $offsetErrorMessage) {
                     $statusLabel.Text = ''
@@ -2582,6 +2744,12 @@ function Show-MainForm {
     $allOffsetMinusButton.Add_Click({ Step-TrackOffsets -Direction -1 -AllTracks })
     $allOffsetPlusButton.Add_Click({ Step-TrackOffsets -Direction 1 -AllTracks })
     $allOffsetApplyButton.Add_Click({ Invoke-AllTrackOffsetInput })
+    $autoOffsetButton.Add_Click({ Invoke-AutoOffset })
+    $form.Add_FormClosing({
+        if ($autoOffsetState.Running) {
+            $_.Cancel = $true
+        }
+    })
     $allOffsetText.Add_Enter({ $form.AcceptButton = $allOffsetApplyButton })
     $allOffsetText.Add_Leave({ $form.AcceptButton = $okButton })
 
@@ -2776,7 +2944,7 @@ function Show-MainForm {
         $videoLabel, $videoText, $videoBrowseButton, $useVideoAudio,
         $selectedOffsetLabel, $selectedOffsetMinusButton, $selectedOffsetPlusButton,
         $allOffsetLabel, $allOffsetMinusButton, $allOffsetPlusButton,
-        $allOffsetText, $allOffsetApplyButton, $grid,
+        $allOffsetText, $allOffsetApplyButton, $autoOffsetButton, $grid,
         $upButton, $downButton, $addTrackButton, $deleteTrackButton, $swapVideoButton,
         $outputLabel, $outputText, $browseButton, $settingsButton,
         $statusLabel, $okButton, $cancelButton
@@ -2800,8 +2968,13 @@ function Show-MainForm {
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-Add-Type -TypeDefinition @"
+Add-Type -TypeDefinition @'
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.Text;
 using System.Windows.Forms;
 
 public class TrackTabEventArgs : EventArgs
@@ -2926,7 +3099,896 @@ public class TrackNameDataGridView : DataGridView
         return base.ProcessDataGridViewKey(e);
     }
 }
-"@ -ReferencedAssemblies @('System.Windows.Forms', 'System.Drawing')
+
+public class AudioOffsetFeatures
+{
+    public float[] Samples;
+    public double[] OnsetLow;
+    public double[] OnsetFull;
+    public double[][] Chroma;
+}
+
+public class AudioOffsetResult
+{
+    public int OffsetMs;
+    public string Level;
+    public double Score;
+    public double SecondScore;
+    public bool FineAligned;
+    public double FineSharpness;
+    public bool DriftWarning;
+    public bool EdgeWarning;
+    public double DriftMs;
+    public double[] SegmentOffsetsMs;
+}
+
+public static class AudioOffsetAnalyzer
+{
+    public const int SampleRate = 8000;
+    const int OnsetFrameSize = 256;
+    const int OnsetHop = 80;
+    const int ChromaFrameSize = 2048;
+    const int ChromaHop = 400;
+    const int ChromaRatio = ChromaHop / OnsetHop;
+    const double FrameMs = 1000.0 * OnsetHop / SampleRate;
+
+    public static double MaxLagSeconds = 180.0;
+    public static double MaxDecodeSeconds = 900.0;
+
+    public static AudioOffsetFeatures Load(string ffmpegPath, string inputPath)
+    {
+        return Extract(Decode(ffmpegPath, inputPath));
+    }
+
+    public static float[] Decode(string ffmpegPath, string inputPath)
+    {
+        ProcessStartInfo info = new ProcessStartInfo();
+        info.FileName = ffmpegPath;
+        info.Arguments = "-v error -nostdin -i \"" + inputPath + "\" -map 0:a:0 -vn -ac 1 -ar " + SampleRate +
+            " -t " + MaxDecodeSeconds.ToString(CultureInfo.InvariantCulture) + " -f f32le -";
+        info.UseShellExecute = false;
+        info.RedirectStandardOutput = true;
+        info.RedirectStandardError = true;
+        info.CreateNoWindow = true;
+
+        StringBuilder errors = new StringBuilder();
+        using (Process process = new Process())
+        {
+            process.StartInfo = info;
+            process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e)
+            {
+                if (e.Data != null)
+                {
+                    lock (errors) { errors.AppendLine(e.Data); }
+                }
+            };
+            process.Start();
+            process.BeginErrorReadLine();
+            MemoryStream buffer = new MemoryStream();
+            process.StandardOutput.BaseStream.CopyTo(buffer);
+            process.WaitForExit();
+
+            if (process.ExitCode != 0)
+            {
+                throw new InvalidOperationException("音声を読み込めませんでした: " + Path.GetFileName(inputPath) + Environment.NewLine + errors.ToString().Trim());
+            }
+
+            byte[] bytes = buffer.ToArray();
+            float[] samples = new float[bytes.Length / 4];
+            Buffer.BlockCopy(bytes, 0, samples, 0, samples.Length * 4);
+            if (samples.Length < SampleRate * 10)
+            {
+                throw new InvalidOperationException("音声が短すぎるため解析できません: " + Path.GetFileName(inputPath));
+            }
+            return samples;
+        }
+    }
+
+    public static AudioOffsetFeatures Extract(float[] samples)
+    {
+        AudioOffsetFeatures features = new AudioOffsetFeatures();
+        features.Samples = samples;
+        ExtractOnsets(samples, out features.OnsetLow, out features.OnsetFull);
+        features.Chroma = ExtractChroma(samples);
+        return features;
+    }
+
+    static void ExtractOnsets(float[] samples, out double[] onsetLow, out double[] onsetFull)
+    {
+        int frames = (samples.Length - OnsetFrameSize) / OnsetHop + 1;
+        double[] window = Hann(OnsetFrameSize);
+        double binHz = (double)SampleRate / OnsetFrameSize;
+        int lowEnd = (int)(250.0 / binHz);
+        int fullEnd = (int)(3800.0 / binHz);
+        double[] re = new double[OnsetFrameSize];
+        double[] im = new double[OnsetFrameSize];
+        double[] previous = new double[fullEnd + 1];
+        double[] low = new double[frames];
+        double[] full = new double[frames];
+
+        for (int t = 0; t < frames; t++)
+        {
+            int offset = t * OnsetHop;
+            for (int i = 0; i < OnsetFrameSize; i++)
+            {
+                re[i] = samples[offset + i] * window[i];
+                im[i] = 0;
+            }
+            Fft(re, im, false);
+
+            double lowSum = 0;
+            double fullSum = 0;
+            for (int k = 1; k <= fullEnd; k++)
+            {
+                double level = Math.Log(1.0 + 100.0 * Math.Sqrt(re[k] * re[k] + im[k] * im[k]));
+                if (t > 0)
+                {
+                    double rise = level - previous[k];
+                    if (rise > 0)
+                    {
+                        fullSum += rise;
+                        if (k <= lowEnd)
+                        {
+                            lowSum += rise;
+                        }
+                    }
+                }
+                previous[k] = level;
+            }
+            low[t] = lowSum;
+            full[t] = fullSum;
+        }
+
+        onsetLow = PrepareOnset(low);
+        onsetFull = PrepareOnset(full);
+    }
+
+    static double[] PrepareOnset(double[] values)
+    {
+        int n = values.Length;
+        int half = 25;
+        double[] prefix = new double[n + 1];
+        for (int i = 0; i < n; i++)
+        {
+            prefix[i + 1] = prefix[i] + values[i];
+        }
+
+        double[] result = new double[n];
+        double mean = 0;
+        for (int i = 0; i < n; i++)
+        {
+            int start = Math.Max(0, i - half);
+            int end = Math.Min(n, i + half + 1);
+            double local = (prefix[end] - prefix[start]) / (end - start);
+            result[i] = Math.Max(0, values[i] - local);
+            mean += result[i];
+        }
+
+        mean /= n;
+        for (int i = 0; i < n; i++)
+        {
+            result[i] -= mean;
+        }
+        return result;
+    }
+
+    static double[][] ExtractChroma(float[] samples)
+    {
+        int frames = (samples.Length - ChromaFrameSize) / ChromaHop + 1;
+        double[] window = Hann(ChromaFrameSize);
+        double binHz = (double)SampleRate / ChromaFrameSize;
+        int maxBin = (int)(2000.0 / binHz);
+        int[] pitchClass = new int[maxBin + 1];
+        for (int k = 0; k <= maxBin; k++)
+        {
+            double frequency = k * binHz;
+            if (frequency < 65.0)
+            {
+                pitchClass[k] = -1;
+                continue;
+            }
+            int note = (int)Math.Round(12.0 * Math.Log(frequency / 440.0, 2.0)) + 69;
+            pitchClass[k] = ((note % 12) + 12) % 12;
+        }
+
+        double[][] chroma = new double[12][];
+        for (int c = 0; c < 12; c++)
+        {
+            chroma[c] = new double[frames];
+        }
+
+        double[] re = new double[ChromaFrameSize];
+        double[] im = new double[ChromaFrameSize];
+        double[] energy = new double[frames];
+        double[] vector = new double[12];
+        for (int t = 0; t < frames; t++)
+        {
+            int offset = t * ChromaHop;
+            for (int i = 0; i < ChromaFrameSize; i++)
+            {
+                re[i] = samples[offset + i] * window[i];
+                im[i] = 0;
+            }
+            Fft(re, im, false);
+
+            Array.Clear(vector, 0, 12);
+            for (int k = 1; k <= maxBin; k++)
+            {
+                if (pitchClass[k] >= 0)
+                {
+                    vector[pitchClass[k]] += re[k] * re[k] + im[k] * im[k];
+                }
+            }
+
+            double norm = 0;
+            for (int c = 0; c < 12; c++)
+            {
+                vector[c] = Math.Sqrt(vector[c]);
+                norm += vector[c] * vector[c];
+            }
+            energy[t] = norm;
+            norm = Math.Sqrt(norm);
+            for (int c = 0; c < 12; c++)
+            {
+                chroma[c][t] = norm > 0 ? vector[c] / norm : 0;
+            }
+        }
+
+        double[] sorted = (double[])energy.Clone();
+        Array.Sort(sorted);
+        double quiet = sorted[sorted.Length / 2] * 0.001;
+        for (int t = 0; t < frames; t++)
+        {
+            if (energy[t] <= quiet)
+            {
+                for (int c = 0; c < 12; c++)
+                {
+                    chroma[c][t] = 0;
+                }
+            }
+        }
+
+        for (int c = 0; c < 12; c++)
+        {
+            double mean = 0;
+            for (int t = 0; t < frames; t++)
+            {
+                mean += chroma[c][t];
+            }
+            mean /= frames;
+            for (int t = 0; t < frames; t++)
+            {
+                chroma[c][t] -= mean;
+            }
+        }
+        return chroma;
+    }
+
+    public static AudioOffsetResult Analyze(AudioOffsetFeatures reference, AudioOffsetFeatures track)
+    {
+        int maxLag = (int)(MaxLagSeconds * 1000.0 / FrameMs);
+        int shorter = Math.Min(reference.OnsetLow.Length, track.OnsetLow.Length);
+        int minOverlap = Math.Max(shorter / 2, Math.Min(shorter, (int)(20000.0 / FrameMs)));
+
+        double[] low = NormalizedCorrelation(new double[][] { reference.OnsetLow }, new double[][] { track.OnsetLow }, maxLag, minOverlap);
+        double[] full = NormalizedCorrelation(new double[][] { reference.OnsetFull }, new double[][] { track.OnsetFull }, maxLag, minOverlap);
+        int chromaMaxLag = maxLag / ChromaRatio + 1;
+        int keyShift;
+        double[] chroma = ChromaCorrelation(reference.Chroma, track.Chroma, chromaMaxLag, minOverlap / ChromaRatio, out keyShift);
+
+        double[] combined = new double[2 * maxLag + 1];
+        for (int i = 0; i < combined.Length; i++)
+        {
+            int lag = i - maxLag;
+            combined[i] = (low[i] + full[i] + Interpolate(chroma, (double)lag / ChromaRatio + chromaMaxLag)) / 3.0;
+        }
+
+        double[] onset = new double[combined.Length];
+        for (int i = 0; i < onset.Length; i++)
+        {
+            onset[i] = low[i] + full[i];
+        }
+
+        int exclusion = (int)(500.0 / FrameMs);
+        int refineRadius = (int)(60.0 / FrameMs);
+        List<int> peaks = TopPeaks(combined, 3, exclusion);
+        AudioOffsetResult result = new AudioOffsetResult();
+        int chosenPeak = peaks[0];
+        double chosenLagMs = 0;
+        double bestSharpness = 0;
+        double secondSharpness = 0;
+        for (int p = 0; p < peaks.Count; p++)
+        {
+            int peak = peaks[p];
+            int refined = ArgMax(onset, Math.Max(0, peak - refineRadius), Math.Min(onset.Length, peak + refineRadius + 1));
+            double coarseLagMs = (refined - maxLag + ParabolicPeak(onset, refined)) * FrameMs;
+            if (p == 0)
+            {
+                chosenLagMs = coarseLagMs;
+            }
+
+            double fineLagMs;
+            double sharpness;
+            bool refinedOk = RefineWithPhat(reference.Samples, track.Samples, coarseLagMs, out fineLagMs, out sharpness);
+            double usable = refinedOk ? sharpness : 0;
+            if (usable > bestSharpness)
+            {
+                secondSharpness = bestSharpness;
+                bestSharpness = usable;
+                if (usable >= 10.0)
+                {
+                    result.FineAligned = true;
+                    chosenPeak = peak;
+                    chosenLagMs = fineLagMs;
+                }
+            }
+            else if (usable > secondSharpness)
+            {
+                secondSharpness = usable;
+            }
+        }
+        result.FineSharpness = bestSharpness;
+
+        double second = double.MinValue;
+        for (int i = 0; i < combined.Length; i++)
+        {
+            if (Math.Abs(i - chosenPeak) > exclusion && combined[i] > second)
+            {
+                second = combined[i];
+            }
+        }
+        result.Score = combined[chosenPeak];
+        result.SecondScore = second;
+
+        double lagMs = chosenLagMs;
+        result.SegmentOffsetsMs = MeasureSegments(reference, track, (int)Math.Round(lagMs / FrameMs), keyShift);
+        double minimum = double.MaxValue;
+        double maximum = double.MinValue;
+        int valid = 0;
+        foreach (double segment in result.SegmentOffsetsMs)
+        {
+            if (double.IsNaN(segment))
+            {
+                continue;
+            }
+            valid++;
+            minimum = Math.Min(minimum, segment);
+            maximum = Math.Max(maximum, segment);
+        }
+        if (valid >= 2)
+        {
+            result.DriftMs = maximum - minimum;
+            result.DriftWarning = result.DriftMs > 80.0;
+        }
+
+        result.OffsetMs = (int)Math.Round(-lagMs);
+        result.EdgeWarning = Math.Abs(chosenPeak - maxLag) >= maxLag - exclusion;
+        double ratio = result.Score / Math.Max(result.SecondScore, 0.01);
+        bool sharpWinner = bestSharpness >= 2.0 * Math.Max(secondSharpness, 5.0);
+        if (result.EdgeWarning)
+        {
+            result.Level = "低";
+        }
+        else if (result.FineAligned && (ratio >= 1.5 || (sharpWinner && ratio >= 1.1)))
+        {
+            result.Level = "高";
+        }
+        else if (result.FineAligned && ratio >= 1.05)
+        {
+            result.Level = "中";
+        }
+        else if (!result.FineAligned && ratio >= 1.15 && result.Score >= 0.2 && valid == 3 && result.DriftMs <= 40.0)
+        {
+            result.Level = "中";
+        }
+        else
+        {
+            result.Level = "低";
+        }
+
+        if (result.DriftMs > 200.0)
+        {
+            result.Level = "低";
+        }
+        else if (result.DriftWarning && result.Level == "高")
+        {
+            result.Level = "中";
+        }
+        return result;
+    }
+
+    static List<int> TopPeaks(double[] values, int count, int separation)
+    {
+        List<int> candidates = new List<int>();
+        for (int i = 0; i < values.Length; i++)
+        {
+            double left = i > 0 ? values[i - 1] : double.MinValue;
+            double right = i < values.Length - 1 ? values[i + 1] : double.MinValue;
+            if (values[i] >= left && values[i] > right)
+            {
+                candidates.Add(i);
+            }
+        }
+        candidates.Sort(delegate(int x, int y) { return values[y].CompareTo(values[x]); });
+
+        List<int> peaks = new List<int>();
+        foreach (int candidate in candidates)
+        {
+            bool separated = true;
+            foreach (int peak in peaks)
+            {
+                if (Math.Abs(peak - candidate) <= separation)
+                {
+                    separated = false;
+                    break;
+                }
+            }
+            if (separated)
+            {
+                peaks.Add(candidate);
+                if (peaks.Count == count)
+                {
+                    break;
+                }
+            }
+        }
+        if (peaks.Count == 0)
+        {
+            peaks.Add(ArgMax(values, 0, values.Length));
+        }
+        return peaks;
+    }
+
+    static double[] MeasureSegments(AudioOffsetFeatures reference, AudioOffsetFeatures track, int lag, int keyShift)
+    {
+        int start = Math.Max(0, -lag);
+        int end = Math.Min(reference.OnsetLow.Length, track.OnsetLow.Length - lag);
+        int segmentLength = (end - start) / 3;
+        double[] offsets = new double[] { double.NaN, double.NaN, double.NaN };
+        if (segmentLength < (int)(15000.0 / FrameMs))
+        {
+            return offsets;
+        }
+
+        int radius = (int)(1000.0 / FrameMs);
+        for (int s = 0; s < 3; s++)
+        {
+            int segmentStart = start + s * segmentLength;
+            int segmentEnd = segmentStart + segmentLength;
+            double bestScore = double.MinValue;
+            int bestLag = lag;
+            double[] scores = new double[2 * radius + 1];
+            for (int d = -radius; d <= radius; d++)
+            {
+                int candidate = lag + d;
+                double score = (LocalCorrelation(reference.OnsetLow, track.OnsetLow, segmentStart, segmentEnd, candidate, 1) +
+                    LocalCorrelation(reference.OnsetFull, track.OnsetFull, segmentStart, segmentEnd, candidate, 1) +
+                    LocalChromaCorrelation(reference.Chroma, track.Chroma, segmentStart, segmentEnd, candidate, keyShift)) / 3.0;
+                scores[d + radius] = score;
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestLag = candidate;
+                }
+            }
+            if (bestScore >= 0.1)
+            {
+                offsets[s] = -(bestLag + ParabolicPeak(scores, bestLag - lag + radius)) * FrameMs;
+            }
+        }
+        return offsets;
+    }
+
+    static double LocalCorrelation(double[] a, double[] b, int start, int end, int lag, int step)
+    {
+        double sxy = 0;
+        double sxx = 0;
+        double syy = 0;
+        for (int t = start; t < end; t += step)
+        {
+            int u = t + lag;
+            if (u < 0 || u >= b.Length || t >= a.Length)
+            {
+                continue;
+            }
+            sxy += a[t] * b[u];
+            sxx += a[t] * a[t];
+            syy += b[u] * b[u];
+        }
+        double denominator = Math.Sqrt(sxx * syy);
+        return denominator > 0 ? sxy / denominator : 0;
+    }
+
+    static double LocalChromaCorrelation(double[][] a, double[][] b, int start, int end, int lag, int rotation)
+    {
+        int chromaStart = start / ChromaRatio;
+        int chromaEnd = end / ChromaRatio;
+        double chromaLag = (double)lag / ChromaRatio;
+        int baseLag = (int)Math.Floor(chromaLag);
+        double fraction = chromaLag - baseLag;
+        double sxy = 0;
+        double sxx = 0;
+        double syy = 0;
+        for (int c = 0; c < 12; c++)
+        {
+            double[] x = a[c];
+            double[] y = b[(c + rotation) % 12];
+            for (int t = chromaStart; t < chromaEnd && t < x.Length; t++)
+            {
+                int u = t + baseLag;
+                if (u < 0 || u + 1 >= y.Length)
+                {
+                    continue;
+                }
+                double value = y[u] * (1 - fraction) + y[u + 1] * fraction;
+                sxy += x[t] * value;
+                sxx += x[t] * x[t];
+                syy += value * value;
+            }
+        }
+        double denominator = Math.Sqrt(sxx * syy);
+        return denominator > 0 ? sxy / denominator : 0;
+    }
+
+    static double[] ChromaCorrelation(double[][] a, double[][] b, int maxLag, int minOverlap, out int keyShift)
+    {
+        int lengthA = a[0].Length;
+        int lengthB = b[0].Length;
+        int size = 1;
+        while (size < lengthA + lengthB)
+        {
+            size <<= 1;
+        }
+
+        double[][] aRe = new double[12][];
+        double[][] aIm = new double[12][];
+        double[][] bRe = new double[12][];
+        double[][] bIm = new double[12][];
+        double[] prefixA = new double[lengthA + 1];
+        double[] prefixB = new double[lengthB + 1];
+        for (int c = 0; c < 12; c++)
+        {
+            aRe[c] = new double[size];
+            aIm[c] = new double[size];
+            bRe[c] = new double[size];
+            bIm[c] = new double[size];
+            Array.Copy(a[c], aRe[c], lengthA);
+            Array.Copy(b[c], bRe[c], lengthB);
+            Fft(aRe[c], aIm[c], false);
+            Fft(bRe[c], bIm[c], false);
+            for (int i = 0; i < lengthA; i++)
+            {
+                prefixA[i + 1] += a[c][i] * a[c][i];
+            }
+            for (int i = 0; i < lengthB; i++)
+            {
+                prefixB[i + 1] += b[c][i] * b[c][i];
+            }
+        }
+        for (int i = 0; i < lengthA; i++)
+        {
+            prefixA[i + 1] += prefixA[i];
+        }
+        for (int i = 0; i < lengthB; i++)
+        {
+            prefixB[i + 1] += prefixB[i];
+        }
+
+        double[] bestScores = new double[2 * maxLag + 1];
+        double bestPeak = double.MinValue;
+        keyShift = 0;
+        double[] re = new double[size];
+        double[] im = new double[size];
+        for (int rotation = 0; rotation < 12; rotation++)
+        {
+            Array.Clear(re, 0, size);
+            Array.Clear(im, 0, size);
+            for (int c = 0; c < 12; c++)
+            {
+                int d = (c + rotation) % 12;
+                double[] xr = aRe[c];
+                double[] xi = aIm[c];
+                double[] yr = bRe[d];
+                double[] yi = bIm[d];
+                for (int k = 0; k < size; k++)
+                {
+                    re[k] += xr[k] * yr[k] + xi[k] * yi[k];
+                    im[k] += xr[k] * yi[k] - xi[k] * yr[k];
+                }
+            }
+            Fft(re, im, true);
+
+            double[] scores = new double[2 * maxLag + 1];
+            double peak = double.MinValue;
+            for (int lag = -maxLag; lag <= maxLag; lag++)
+            {
+                int start = Math.Max(0, -lag);
+                int end = Math.Min(lengthA, lengthB - lag);
+                if (end - start < minOverlap)
+                {
+                    continue;
+                }
+                double denominator = Math.Sqrt((prefixA[end] - prefixA[start]) * (prefixB[end + lag] - prefixB[start + lag]));
+                double score = denominator > 0 ? re[(lag + size) % size] / denominator : 0;
+                scores[lag + maxLag] = score;
+                peak = Math.Max(peak, score);
+            }
+            if (peak > bestPeak)
+            {
+                bestPeak = peak;
+                bestScores = scores;
+                keyShift = rotation;
+            }
+        }
+        return bestScores;
+    }
+
+    static bool RefineWithPhat(float[] a, float[] b, double coarseLagMs, out double lagMs, out double sharpness)
+    {
+        lagMs = coarseLagMs;
+        sharpness = 0;
+        int center = (int)Math.Round(coarseLagMs * SampleRate / 1000.0);
+        int size = 1 << 19;
+        int start = Math.Max(0, -center);
+        int end = Math.Min(a.Length, b.Length - center);
+        if (end - start < SampleRate * 10)
+        {
+            return false;
+        }
+
+        int length = Math.Min(end - start, size / 2);
+        int segmentStart = start + (end - start - length) / 2;
+        double[] aRe = new double[size];
+        double[] aIm = new double[size];
+        double[] bRe = new double[size];
+        double[] bIm = new double[size];
+        for (int i = 0; i < length; i++)
+        {
+            double w = 0.5 - 0.5 * Math.Cos(2 * Math.PI * i / length);
+            aRe[i] = a[segmentStart + i] * w;
+            bRe[i] = b[segmentStart + i + center] * w;
+        }
+        Fft(aRe, aIm, false);
+        Fft(bRe, bIm, false);
+
+        int lowBin = (int)(100.0 * size / SampleRate);
+        int highBin = (int)(3800.0 * size / SampleRate);
+        for (int k = 0; k < size; k++)
+        {
+            int bin = k <= size / 2 ? k : size - k;
+            double re = aRe[k] * bRe[k] + aIm[k] * bIm[k];
+            double im = aRe[k] * bIm[k] - aIm[k] * bRe[k];
+            double magnitude = Math.Sqrt(re * re + im * im);
+            if (bin < lowBin || bin > highBin || magnitude <= 1e-12)
+            {
+                aRe[k] = 0;
+                aIm[k] = 0;
+                continue;
+            }
+            aRe[k] = re / magnitude;
+            aIm[k] = im / magnitude;
+        }
+        Fft(aRe, aIm, true);
+
+        int radius = SampleRate * 25 / 1000;
+        int noiseRadius = SampleRate;
+        double[] window = new double[2 * radius + 1];
+        int bestIndex = 0;
+        for (int d = -radius; d <= radius; d++)
+        {
+            window[d + radius] = aRe[(d + size) % size];
+            if (window[d + radius] > window[bestIndex])
+            {
+                bestIndex = d + radius;
+            }
+        }
+
+        double sumSquares = 0;
+        int count = 0;
+        int peak = bestIndex - radius;
+        for (int d = -noiseRadius; d <= noiseRadius; d++)
+        {
+            if (Math.Abs(d - peak) <= 16)
+            {
+                continue;
+            }
+            double value = aRe[(d + size) % size];
+            sumSquares += value * value;
+            count++;
+        }
+        double noise = Math.Sqrt(sumSquares / Math.Max(count, 1));
+        sharpness = noise > 0 ? window[bestIndex] / noise : 0;
+        if (bestIndex == 0 || bestIndex == window.Length - 1)
+        {
+            return false;
+        }
+
+        lagMs = (center + peak + ParabolicPeak(window, bestIndex)) * 1000.0 / SampleRate;
+        return true;
+    }
+
+    static double[] NormalizedCorrelation(double[][] a, double[][] b, int maxLag, int minOverlap)
+    {
+        int lengthA = a[0].Length;
+        int lengthB = b[0].Length;
+        double[] cross = new double[2 * maxLag + 1];
+        double[] prefixA = new double[lengthA + 1];
+        double[] prefixB = new double[lengthB + 1];
+        int size = 1;
+        while (size < lengthA + lengthB)
+        {
+            size <<= 1;
+        }
+
+        for (int d = 0; d < a.Length; d++)
+        {
+            double[] aRe = new double[size];
+            double[] aIm = new double[size];
+            double[] bRe = new double[size];
+            double[] bIm = new double[size];
+            Array.Copy(a[d], aRe, lengthA);
+            Array.Copy(b[d], bRe, lengthB);
+            Fft(aRe, aIm, false);
+            Fft(bRe, bIm, false);
+            for (int k = 0; k < size; k++)
+            {
+                double re = aRe[k] * bRe[k] + aIm[k] * bIm[k];
+                double im = aRe[k] * bIm[k] - aIm[k] * bRe[k];
+                aRe[k] = re;
+                aIm[k] = im;
+            }
+            Fft(aRe, aIm, true);
+            for (int lag = -maxLag; lag <= maxLag; lag++)
+            {
+                cross[lag + maxLag] += aRe[(lag + size) % size];
+            }
+            for (int i = 0; i < lengthA; i++)
+            {
+                prefixA[i + 1] += a[d][i] * a[d][i];
+            }
+            for (int i = 0; i < lengthB; i++)
+            {
+                prefixB[i + 1] += b[d][i] * b[d][i];
+            }
+        }
+
+        for (int i = 0; i < lengthA; i++)
+        {
+            prefixA[i + 1] += prefixA[i];
+        }
+        for (int i = 0; i < lengthB; i++)
+        {
+            prefixB[i + 1] += prefixB[i];
+        }
+
+        double[] scores = new double[2 * maxLag + 1];
+        for (int lag = -maxLag; lag <= maxLag; lag++)
+        {
+            int start = Math.Max(0, -lag);
+            int end = Math.Min(lengthA, lengthB - lag);
+            if (end - start < minOverlap)
+            {
+                continue;
+            }
+            double energyA = prefixA[end] - prefixA[start];
+            double energyB = prefixB[end + lag] - prefixB[start + lag];
+            double denominator = Math.Sqrt(energyA * energyB);
+            scores[lag + maxLag] = denominator > 0 ? cross[lag + maxLag] / denominator : 0;
+        }
+        return scores;
+    }
+
+    static double Interpolate(double[] values, double position)
+    {
+        if (position <= 0)
+        {
+            return values[0];
+        }
+        if (position >= values.Length - 1)
+        {
+            return values[values.Length - 1];
+        }
+        int index = (int)Math.Floor(position);
+        double fraction = position - index;
+        return values[index] * (1 - fraction) + values[index + 1] * fraction;
+    }
+
+    static int ArgMax(double[] values, int start, int end)
+    {
+        int best = start;
+        for (int i = start + 1; i < end; i++)
+        {
+            if (values[i] > values[best])
+            {
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    static double ParabolicPeak(double[] values, int index)
+    {
+        if (index <= 0 || index >= values.Length - 1)
+        {
+            return 0;
+        }
+        double left = values[index - 1];
+        double center = values[index];
+        double right = values[index + 1];
+        double denominator = left - 2 * center + right;
+        if (denominator >= 0)
+        {
+            return 0;
+        }
+        return Math.Max(-0.5, Math.Min(0.5, 0.5 * (left - right) / denominator));
+    }
+
+    static double[] Hann(int size)
+    {
+        double[] window = new double[size];
+        for (int i = 0; i < size; i++)
+        {
+            window[i] = 0.5 - 0.5 * Math.Cos(2 * Math.PI * i / size);
+        }
+        return window;
+    }
+
+    static void Fft(double[] re, double[] im, bool inverse)
+    {
+        int n = re.Length;
+        for (int i = 1, j = 0; i < n; i++)
+        {
+            int bit = n >> 1;
+            for (; (j & bit) != 0; bit >>= 1)
+            {
+                j ^= bit;
+            }
+            j ^= bit;
+            if (i < j)
+            {
+                double temp = re[i]; re[i] = re[j]; re[j] = temp;
+                temp = im[i]; im[i] = im[j]; im[j] = temp;
+            }
+        }
+
+        for (int length = 2; length <= n; length <<= 1)
+        {
+            double angle = 2 * Math.PI / length * (inverse ? 1 : -1);
+            double stepRe = Math.Cos(angle);
+            double stepIm = Math.Sin(angle);
+            int half = length >> 1;
+            for (int i = 0; i < n; i += length)
+            {
+                double wRe = 1;
+                double wIm = 0;
+                for (int k = 0; k < half; k++)
+                {
+                    int a = i + k;
+                    int b = a + half;
+                    double tRe = re[b] * wRe - im[b] * wIm;
+                    double tIm = re[b] * wIm + im[b] * wRe;
+                    re[b] = re[a] - tRe;
+                    im[b] = im[a] - tIm;
+                    re[a] += tRe;
+                    im[a] += tIm;
+                    double nextRe = wRe * stepRe - wIm * stepIm;
+                    wIm = wRe * stepIm + wIm * stepRe;
+                    wRe = nextRe;
+                }
+            }
+        }
+
+        if (inverse)
+        {
+            for (int i = 0; i < n; i++)
+            {
+                re[i] /= n;
+                im[i] /= n;
+            }
+        }
+    }
+}
+'@ -ReferencedAssemblies @('System.Windows.Forms', 'System.Drawing')
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 $Script:Settings = Read-Settings

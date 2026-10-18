@@ -20,6 +20,7 @@ GUI only:
 - View and edit track names, and choose from candidates
 - Add, delete, and reorder tracks
 - Swap the main video with an `.mp4` file in the audio tracks
+- Auto-adjust each track's offset by comparing it with the video's audio
 
 Features under `GUI only` are available only in the GUI. The CLI uses file order and interactive prompts instead.
 
@@ -153,6 +154,24 @@ If the video field is empty and multiple files are dropped onto the track list, 
 - Starting earlier trims the beginning of the audio (no re-encoding).
 - Delaying follows the **delay method** setting. See [Delay Method](#delay-method) for details.
 - If you enter something other than an integer, the previous value is restored.
+
+### Auto-Adjust Offsets
+
+Press **自動調整** (auto-adjust) to compare each track with the video's audio, find the lag, and fill in the offset. The source video's audio track is skipped.
+
+- It is designed to work with on-vocal and off-vocal versions of the same song, other singers, different keys, live recordings, and different arrangements.
+- Tracks that share the same backing track are matched to within 1 ms; different arrangements and similar cases to within about 10 ms.
+- Each result has a confidence level:
+
+  | Confidence | What happens |
+  |---|---|
+  | 高 (high) | The offset is applied. |
+  | 中 (medium) | The offset is applied and the cell turns yellow. Please check it. |
+  | 低 (low) | Nothing is changed and the cell turns red. |
+
+- Hover over the cell to see the detected lag and confidence.
+- Recordings played at a different speed (such as a live take with a different tempo) cannot be aligned with a single offset, so a note says the tempo or length may differ.
+- Lags up to 180 seconds in either direction are searched, and the first 15 minutes of each file are analyzed.
 
 ### Reorder Tracks
 
