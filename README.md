@@ -19,6 +19,7 @@ GUI only:
 - GUI workflow for selecting a video and audio tracks
 - View and edit track names, and choose from candidates
 - Add, delete, and reorder tracks
+- Swap the main video with an `.mp4` file in the audio tracks
 
 Features under `GUI only` are available only in the GUI. The CLI uses file order and interactive prompts instead.
 
@@ -158,6 +159,9 @@ If the video field is empty and multiple files are dropped onto the track list, 
 - Drag and drop rows to reorder tracks.
 - Use **↑ Up** / **↓ Down** to move tracks.
 - Drag and drop an `.mp4` track row onto the video field to swap it with the main video.
+- Or select an `.mp4` track and press **↔ 動画と交換** (swap with video). Use this when the video should be an `.mp4` other than the first one found.
+- The **種類** (type) column in the track list shows each file's extension, such as `MP4` or `M4A`, so you can see which tracks are `.mp4`. The source video's audio is shown as `元動画`.
+- The **入力ファイル** (input file) column shows only the file name. Hover over it to see the full path.
 
 ### Keyboard Workflow
 

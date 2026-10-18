@@ -812,11 +812,17 @@ function Set-GridTheme {
 function Get-TrackSourceText {
     param([object]$Item)
 
+    return [System.IO.Path]::GetFileName([string]$Item.SourceFile)
+}
+
+function Get-TrackTypeText {
+    param([object]$Item)
+
     if ($Item.IsVideoAudio) {
-        return '元動画の音声: ' + $Item.SourceFile
+        return '元動画'
     }
 
-    return $Item.SourceFile
+    return [System.IO.Path]::GetExtension([string]$Item.SourceFile).TrimStart('.').ToUpperInvariant()
 }
 
 function Add-TrackNameCandidateToGrid {
@@ -995,7 +1001,8 @@ function Add-TrackRow {
     )
 
     Add-TrackNameCandidateToGrid -Grid $Grid -Name ([string]$Item.Title)
-    $rowIndex = $Grid.Rows.Add('', $Item.Title, (Format-OffsetMs ([int]$Item.OffsetMs)), (Get-TrackSourceText $Item))
+    $rowIndex = $Grid.Rows.Add('', $Item.Title, (Format-OffsetMs ([int]$Item.OffsetMs)), (Get-TrackTypeText $Item), (Get-TrackSourceText $Item))
+    $Grid.Rows[$rowIndex].Cells[4].ToolTipText = [string]$Item.SourceFile
     $Grid.Rows[$rowIndex].Tag = $Item
 }
 
@@ -1723,13 +1730,13 @@ function Show-MainForm {
     $selectedOffsetMinusButton = New-Object System.Windows.Forms.Button
     $selectedOffsetMinusButton.Location = New-Object System.Drawing.Point(94, 74)
     $selectedOffsetMinusButton.Size = New-Object System.Drawing.Size(64, 28)
-    $selectedOffsetMinusButton.TabIndex = 7
+    $selectedOffsetMinusButton.TabIndex = 8
     Set-ButtonTheme -Button $selectedOffsetMinusButton
 
     $selectedOffsetPlusButton = New-Object System.Windows.Forms.Button
     $selectedOffsetPlusButton.Location = New-Object System.Drawing.Point(162, 74)
     $selectedOffsetPlusButton.Size = New-Object System.Drawing.Size(64, 28)
-    $selectedOffsetPlusButton.TabIndex = 8
+    $selectedOffsetPlusButton.TabIndex = 9
     Set-ButtonTheme -Button $selectedOffsetPlusButton
 
     $allOffsetLabel = New-Object System.Windows.Forms.Label
@@ -1741,27 +1748,27 @@ function Show-MainForm {
     $allOffsetMinusButton = New-Object System.Windows.Forms.Button
     $allOffsetMinusButton.Location = New-Object System.Drawing.Point(314, 74)
     $allOffsetMinusButton.Size = New-Object System.Drawing.Size(64, 28)
-    $allOffsetMinusButton.TabIndex = 9
+    $allOffsetMinusButton.TabIndex = 10
     Set-ButtonTheme -Button $allOffsetMinusButton
 
     $allOffsetPlusButton = New-Object System.Windows.Forms.Button
     $allOffsetPlusButton.Location = New-Object System.Drawing.Point(382, 74)
     $allOffsetPlusButton.Size = New-Object System.Drawing.Size(64, 28)
-    $allOffsetPlusButton.TabIndex = 10
+    $allOffsetPlusButton.TabIndex = 11
     Set-ButtonTheme -Button $allOffsetPlusButton
 
     $allOffsetText = New-Object System.Windows.Forms.TextBox
     $allOffsetText.Location = New-Object System.Drawing.Point(462, 77)
     $allOffsetText.Size = New-Object System.Drawing.Size(64, 22)
     $allOffsetText.TextAlign = [System.Windows.Forms.HorizontalAlignment]::Right
-    $allOffsetText.TabIndex = 11
+    $allOffsetText.TabIndex = 12
     Set-TextBoxTheme -TextBox $allOffsetText
 
     $allOffsetApplyButton = New-Object System.Windows.Forms.Button
     $allOffsetApplyButton.Text = 'ずらす'
     $allOffsetApplyButton.Location = New-Object System.Drawing.Point(530, 74)
     $allOffsetApplyButton.Size = New-Object System.Drawing.Size(64, 28)
-    $allOffsetApplyButton.TabIndex = 12
+    $allOffsetApplyButton.TabIndex = 13
     Set-ButtonTheme -Button $allOffsetApplyButton
 
     $grid = New-Object TrackNameDataGridView
@@ -1780,7 +1787,7 @@ function Show-MainForm {
     $numberColumn = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
     $numberColumn.HeaderText = 'No.'
     $numberColumn.ReadOnly = $true
-    $numberColumn.FillWeight = 12
+    $numberColumn.FillWeight = 8
     $grid.Columns.Add($numberColumn) | Out-Null
 
     $titleColumn = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
@@ -1796,10 +1803,17 @@ function Show-MainForm {
     $offsetColumn.DefaultCellStyle.Alignment = [System.Windows.Forms.DataGridViewContentAlignment]::MiddleRight
     $grid.Columns.Add($offsetColumn) | Out-Null
 
+    $typeColumn = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
+    $typeColumn.HeaderText = '種類'
+    $typeColumn.ReadOnly = $true
+    $typeColumn.FillWeight = 10
+    $typeColumn.DefaultCellStyle.Alignment = [System.Windows.Forms.DataGridViewContentAlignment]::MiddleCenter
+    $grid.Columns.Add($typeColumn) | Out-Null
+
     $sourceColumn = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
     $sourceColumn.HeaderText = '入力ファイル'
     $sourceColumn.ReadOnly = $true
-    $sourceColumn.FillWeight = 46
+    $sourceColumn.FillWeight = 40
     $grid.Columns.Add($sourceColumn) | Out-Null
 
     $upButton = New-Object System.Windows.Forms.Button
@@ -1834,6 +1848,15 @@ function Show-MainForm {
     $deleteTrackButton.TabIndex = 6
     Set-ButtonTheme -Button $deleteTrackButton -Kind Danger
 
+    $swapVideoButton = New-Object System.Windows.Forms.Button
+    $swapVideoButton.Text = '↔ 動画と交換'
+    $swapVideoButton.Location = New-Object System.Drawing.Point(754, 268)
+    $swapVideoButton.Size = New-Object System.Drawing.Size(94, 30)
+    $swapVideoButton.Anchor = 'Top,Right'
+    $swapVideoButton.TabIndex = 7
+    Set-ButtonTheme -Button $swapVideoButton
+    $offsetToolTip.SetToolTip($swapVideoButton, '選択中の .mp4 トラックと、上の動画ファイルを入れ替えます')
+
     $outputLabel = New-Object System.Windows.Forms.Label
     $outputLabel.Text = '出力'
     $outputLabel.Location = New-Object System.Drawing.Point(12, 420)
@@ -1846,7 +1869,7 @@ function Show-MainForm {
     $outputText.Location = New-Object System.Drawing.Point(88, 417)
     $outputText.Size = New-Object System.Drawing.Size(654, 22)
     $outputText.Anchor = 'Left,Right,Bottom'
-    $outputText.TabIndex = 13
+    $outputText.TabIndex = 14
     Set-TextBoxTheme -TextBox $outputText
 
     $browseButton = New-Object System.Windows.Forms.Button
@@ -1854,7 +1877,7 @@ function Show-MainForm {
     $browseButton.Location = New-Object System.Drawing.Point(754, 414)
     $browseButton.Size = New-Object System.Drawing.Size(94, 28)
     $browseButton.Anchor = 'Right,Bottom'
-    $browseButton.TabIndex = 14
+    $browseButton.TabIndex = 15
     Set-ButtonTheme -Button $browseButton
 
     $settingsButton = New-Object System.Windows.Forms.Button
@@ -1862,7 +1885,7 @@ function Show-MainForm {
     $settingsButton.Location = New-Object System.Drawing.Point(12, 484)
     $settingsButton.Size = New-Object System.Drawing.Size(94, 30)
     $settingsButton.Anchor = 'Left,Bottom'
-    $settingsButton.TabIndex = 15
+    $settingsButton.TabIndex = 16
     Set-ButtonTheme -Button $settingsButton
 
     $statusLabel = New-Object System.Windows.Forms.Label
@@ -1877,7 +1900,7 @@ function Show-MainForm {
     $okButton.Location = New-Object System.Drawing.Point(656, 484)
     $okButton.Size = New-Object System.Drawing.Size(92, 30)
     $okButton.Anchor = 'Right,Bottom'
-    $okButton.TabIndex = 16
+    $okButton.TabIndex = 17
     Set-ButtonTheme -Button $okButton -Kind Primary
 
     $cancelButton = New-Object System.Windows.Forms.Button
@@ -1885,7 +1908,7 @@ function Show-MainForm {
     $cancelButton.Location = New-Object System.Drawing.Point(756, 484)
     $cancelButton.Size = New-Object System.Drawing.Size(92, 30)
     $cancelButton.Anchor = 'Right,Bottom'
-    $cancelButton.TabIndex = 17
+    $cancelButton.TabIndex = 18
     $cancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     Set-ButtonTheme -Button $cancelButton
 
@@ -1893,7 +1916,8 @@ function Show-MainForm {
     $trackDragFormat = 'ffmpegMp4Mix.TrackRowIndex'
     $trackNameColumnIndex = 1
     $offsetColumnIndex = 2
-    $sourceColumnIndex = 3
+    $typeColumnIndex = 3
+    $sourceColumnIndex = 4
     $offsetErrorMessage = 'オフセットは整数（ミリ秒）で入力してください。元の値に戻しました。'
     $allOffsetErrorMessage = '全トラックをずらす量は整数（ミリ秒）で入力してください。'
     $trackDragState = [PSCustomObject]@{
@@ -2040,7 +2064,9 @@ function Show-MainForm {
 
             if ([bool]$row.Tag.IsVideoAudio) {
                 $row.Tag.SourceFile = $Script:VideoFile
+                $row.Cells[$typeColumnIndex].Value = Get-TrackTypeText $row.Tag
                 $row.Cells[$sourceColumnIndex].Value = Get-TrackSourceText $row.Tag
+                $row.Cells[$sourceColumnIndex].ToolTipText = [string]$row.Tag.SourceFile
                 $updated = $true
             }
         }
@@ -2221,7 +2247,9 @@ function Show-MainForm {
         }
         else {
             $tag.SourceFile = $oldVideo
+            $row.Cells[$typeColumnIndex].Value = Get-TrackTypeText $tag
             $row.Cells[$sourceColumnIndex].Value = Get-TrackSourceText $tag
+            $row.Cells[$sourceColumnIndex].ToolTipText = [string]$tag.SourceFile
         }
 
         Set-MainVideoFile -VideoFile $newVideo
@@ -2634,6 +2662,21 @@ function Show-MainForm {
         }
     })
 
+    $swapVideoButton.Add_Click({
+        if ($null -eq $grid.CurrentCell) {
+            Show-ErrorMessage '動画と入れ替えるトラックを選択してください。'
+            return
+        }
+
+        try {
+            Complete-TrackNameEdit -Grid $grid -TrackNameColumnIndex $trackNameColumnIndex
+            Swap-TrackWithMainVideo -RowIndex $grid.CurrentCell.RowIndex
+        }
+        catch {
+            Show-ErrorMessage $_.Exception.Message
+        }
+    })
+
     $browseButton.Add_Click({
         $dialog = New-Object System.Windows.Forms.SaveFileDialog
         $dialog.Filter = 'MP4 files (*.mp4)|*.mp4|All files (*.*)|*.*'
@@ -2734,7 +2777,7 @@ function Show-MainForm {
         $selectedOffsetLabel, $selectedOffsetMinusButton, $selectedOffsetPlusButton,
         $allOffsetLabel, $allOffsetMinusButton, $allOffsetPlusButton,
         $allOffsetText, $allOffsetApplyButton, $grid,
-        $upButton, $downButton, $addTrackButton, $deleteTrackButton,
+        $upButton, $downButton, $addTrackButton, $deleteTrackButton, $swapVideoButton,
         $outputLabel, $outputText, $browseButton, $settingsButton,
         $statusLabel, $okButton, $cancelButton
     ))
