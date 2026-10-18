@@ -1,0 +1,180 @@
+# ぴたトラックに同梱する ffmpeg.exe（FFmpeg の LGPL ビルド、Windows x64）を作って確かめる。
+#   build:      Ubuntu で mingw-w64 を使ってクロスコンパイル（dev/ffmpeg-lgpl/build.sh）
+#   test-media: 確かめるための素材を作る（ふつうの ffmpeg を使う。素材を作るだけ）
+#   test:       Windows で、ぴたトラックの使い方どおりに動くかを確かめる（test_pitatrack_usage.ps1）
+#   release:    タグ ffmpeg-<版>-pitatrack<n> を push したとき、GitHub Release に ffmpeg.exe とソースを置く。
+#               手動で release_tag を指定したときは、その Release に同じものを追加する
+name: FFmpeg LGPL build
+
+on:
+  push:
+    branches: [main]
+    tags: ['ffmpeg-*']
+    paths:
+      - '.github/workflows/ffmpeg-lgpl.yml'
+      - 'dev/ffmpeg-lgpl/**'
+      - 'tools/mixtrack_ffmpeg_gui.ps1'
+  pull_request:
+    paths:
+      - '.github/workflows/ffmpeg-lgpl.yml'
+      - 'dev/ffmpeg-lgpl/**'
+      - 'tools/mixtrack_ffmpeg_gui.ps1'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'この GitHub Release（作成済み）にも ffmpeg.exe とソースを追加する（例: v2.1.0）。空なら追加しない'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      name: ${{ steps.build.outputs.name }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential curl ca-certificates xz-utils gnupg nasm \
+            gcc-mingw-w64-x86-64-win32 binutils-mingw-w64-x86-64 mingw-w64-x86-64-dev
+
+      - name: Build ffmpeg.exe
+        id: build
+        env:
+          # プルリクエストの GITHUB_SHA は一時的なマージコミットなので、ブランチのコミットを書く
+          BUILD_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          bash dev/ffmpeg-lgpl/build.sh dist/ffmpeg-lgpl
+          . dev/ffmpeg-lgpl/ffmpeg-source.env
+          name="ffmpeg-${FFMPEG_VERSION}-pitatrack${PITATRACK_BUILD}"
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+          {
+            echo "## ${name}"
+            echo
+            echo "ffmpeg.exe: $(stat -c %s "dist/ffmpeg-lgpl/${name}-lgpl-win64/ffmpeg.exe") bytes"
+            echo
+            echo '```'
+            cat "dist/ffmpeg-lgpl/${name}-lgpl-win64/BUILD.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.build.outputs.name }}-lgpl-win64
+          path: dist/ffmpeg-lgpl/${{ steps.build.outputs.name }}-lgpl-win64/
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.build.outputs.name }}-source
+          path: dist/ffmpeg-lgpl/${{ steps.build.outputs.name }}-source/
+          if-no-files-found: error
+          compression-level: 0
+
+  test-media:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Make the test media
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          python3 -I dev/ffmpeg-lgpl/make_test_media.py test-media
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: test-media
+          path: test-media/
+          if-no-files-found: error
+          retention-days: 3
+
+  test:
+    needs: [build, test-media]
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.name }}-lgpl-win64
+          path: ffmpeg
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: test-media
+          path: test-media
+
+      # ぴたトラックと同じ Windows PowerShell 5.1 で動かす
+      - name: Test PitaTrack's use of ffmpeg.exe
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File dev\ffmpeg-lgpl\test_pitatrack_usage.ps1 -FfmpegPath ffmpeg\ffmpeg.exe -MediaDir test-media -OutputDir test-results
+          exit $LASTEXITCODE
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ${{ needs.build.outputs.name }}-test-report
+          path: |
+            test-results/*.md
+            test-results/*.txt
+            test-results/**/*.log
+          if-no-files-found: warn
+
+  release:
+    needs: [build, test]
+    if: startsWith(github.ref, 'refs/tags/ffmpeg-') || inputs.release_tag != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      NAME: ${{ needs.build.outputs.name }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.name }}-lgpl-win64
+          path: build-output/${{ needs.build.outputs.name }}-lgpl-win64
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.name }}-source
+          path: build-output/${{ needs.build.outputs.name }}-source
+
+      - name: Package the release files
+        run: bash dev/ffmpeg-lgpl/package_release.sh build-output release
+
+      # ライセンス表示が指すソースの置き場所。タグは ffmpeg-source.env の版と同じにする
+      - name: Create the release for the tag
+        if: startsWith(github.ref, 'refs/tags/ffmpeg-')
+        run: |
+          if [ "${GITHUB_REF_NAME}" != "${NAME}" ]; then
+            echo "::error::タグ ${GITHUB_REF_NAME} が ffmpeg-source.env の版（${NAME}）と違います"
+            exit 1
+          fi
+          files=(release/*.zip release/*.tar.xz release/*.asc release/SHA256SUMS.txt)
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" "${files[@]}" --clobber
+          else
+            # ぴたトラック本体の「最新のリリース」は変えない
+            gh release create "${GITHUB_REF_NAME}" "${files[@]}" --verify-tag --latest=false \
+              --title "FFmpeg ${NAME#ffmpeg-} (LGPL) for PitaTrack" --notes-file release/release-notes.md
+          fi
+
+      - name: Add the files to the given release
+        if: inputs.release_tag != ''
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: gh release upload "${RELEASE_TAG}" release/*.zip release/*.tar.xz release/*.asc --clobber
