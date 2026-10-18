@@ -1,10 +1,15 @@
-﻿param(
+﻿[CmdletBinding(PositionalBinding = $false)]
+param(
     [switch]$ValidateOnly,
+    [switch]$CliDefaults,
+    [int]$UseVideoAudio = 0,
+    [string]$OutFile,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$Files
 )
 
 $ErrorActionPreference = 'Stop'
+$Script:CliMode = $CliDefaults.IsPresent
 $Script:ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Script:RootDir = $Script:ScriptDir
 $parentDir = Split-Path -Parent $Script:ScriptDir
@@ -20,6 +25,8 @@ $Script:Settings = $null
 $Script:VideoFile = $null
 $Script:AudioFiles = @()
 $Script:DefaultOutputPath = $null
+$Script:SavedOutputPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+$Script:AutoOffsetReference = $null
 
 function New-DefaultSettings {
     [PSCustomObject]@{
@@ -33,7 +40,18 @@ function New-DefaultSettings {
         DelayMode           = 'copy'
         ReencodeBitrate     = '256k'
         OffsetStepMs        = 100
+        AutoOffsetAlways    = $false
     }
+}
+
+function ConvertTo-SettingFlag {
+    param([object]$Value)
+
+    if ($Value -is [bool]) {
+        return $Value
+    }
+
+    return ([string]$Value).Trim() -eq 'true'
 }
 
 function ConvertTo-OffsetStepMs {
@@ -106,23 +124,26 @@ function Read-BatchDefaultSettings {
     }
 
     foreach ($line in (Get-Content -LiteralPath $batchPath -Encoding Default)) {
-        if ($line -match '^\s*set\s+"?TRACKNAME_(\d+)=(.*?)"?\s*$') {
+        if ($line -match '^\s*:') {
+            break
+        }
+        if ($line -match '^\s*set\s+"?TRACKNAME_(\d+)=(.*?)"?\s*$' -and $Matches[2] -notlike '*%*') {
             $map[$Matches[1]] = $Matches[2]
             continue
         }
-        if ($line -match '^\s*set\s+"?TRACKNAME_LATER=(.*?)"?\s*$') {
+        if ($line -match '^\s*set\s+"?TRACKNAME_LATER=(.*?)"?\s*$' -and $Matches[1] -notlike '*%*') {
             $laterName = $Matches[1]
             continue
         }
-        if ($line -match '^\s*(?:if\s+.*?\s+)?set\s+"?OUTPUT_SUFFIX=(.*?)"?\s*$') {
+        if ($line -match '^\s*(?:if\s+.*?\s+)?set\s+"?OUTPUT_SUFFIX=(.*?)"?\s*$' -and $Matches[1] -notlike '*%*') {
             $suffix = $Matches[1]
             continue
         }
-        if ($line -match '^\s*set\s+"?DELAY_MODE=(.*?)"?\s*$') {
+        if ($line -match '^\s*set\s+"?DELAY_MODE=(.*?)"?\s*$' -and $Matches[1] -notlike '*%*') {
             $delayMode = $Matches[1]
             continue
         }
-        if ($line -match '^\s*set\s+"?REENCODE_BITRATE=(.*?)"?\s*$') {
+        if ($line -match '^\s*set\s+"?REENCODE_BITRATE=(.*?)"?\s*$' -and $Matches[1] -notlike '*%*') {
             $reencodeBitrate = $Matches[1]
             continue
         }
@@ -233,9 +254,104 @@ function Get-TrackNameCandidates {
     }
     if ($null -ne $Settings) {
         Add-UniqueStringValue -List $list -Value $Settings.LaterName
+        $profiles = ConvertTo-TrackCountProfiles $Settings.TrackCountProfiles
+        foreach ($count in $profiles.Keys) {
+            $profileMap = Get-TrackNameMap $profiles[$count]
+            foreach ($key in (Get-SortedTrackNameKeys $profileMap)) {
+                Add-UniqueStringValue -List $list -Value $profileMap[$key]
+            }
+        }
     }
 
     return @($list.ToArray())
+}
+
+function ConvertTo-TrackCountProfiles {
+    param([object]$Profiles)
+
+    $entries = @{}
+    if ($null -ne $Profiles) {
+        $pairs = @()
+        if ($Profiles -is [System.Collections.IDictionary]) {
+            foreach ($key in @($Profiles.Keys)) {
+                $pairs += [PSCustomObject]@{ Name = [string]$key; Value = $Profiles[$key] }
+            }
+        }
+        else {
+            foreach ($property in $Profiles.PSObject.Properties) {
+                $pairs += [PSCustomObject]@{ Name = [string]$property.Name; Value = $property.Value }
+            }
+        }
+
+        foreach ($pair in $pairs) {
+            $count = 0
+            if (-not [int]::TryParse($pair.Name, [ref]$count) -or $count -le 0 -or $null -eq $pair.Value) {
+                continue
+            }
+
+            $names = [ordered]@{}
+            $map = Get-TrackNameMap $pair.Value
+            foreach ($key in (Get-SortedTrackNameKeys $map)) {
+                if (-not [string]::IsNullOrWhiteSpace($map[$key])) {
+                    $names[[string][int]$key] = [string]$map[$key]
+                }
+            }
+            $entries[$count] = [PSCustomObject]@{
+                TrackNames   = $names
+                OutputSuffix = [string]$pair.Value.OutputSuffix
+            }
+        }
+    }
+
+    $result = [ordered]@{}
+    foreach ($count in ($entries.Keys | Sort-Object)) {
+        $result[[string]$count] = $entries[$count]
+    }
+    return $result
+}
+
+function Get-TrackCountProfile {
+    param(
+        [object]$Settings,
+        [int]$TrackCount
+    )
+
+    if ($null -eq $Settings -or $TrackCount -le 0 -or $null -eq $Settings.TrackCountProfiles) {
+        return $null
+    }
+
+    $key = [string]$TrackCount
+    $profiles = $Settings.TrackCountProfiles
+    if ($profiles -is [System.Collections.IDictionary]) {
+        if ($profiles.Contains($key)) {
+            return $profiles[$key]
+        }
+        return $null
+    }
+
+    $property = $profiles.PSObject.Properties[$key]
+    if ($null -ne $property) {
+        return $property.Value
+    }
+    return $null
+}
+
+function Get-OutputSuffix {
+    param(
+        [object]$Settings,
+        [int]$TrackCount = 0
+    )
+
+    $countProfile = Get-TrackCountProfile -Settings $Settings -TrackCount $TrackCount
+    if ($null -ne $countProfile -and -not [string]::IsNullOrWhiteSpace([string]$countProfile.OutputSuffix)) {
+        return [string]$countProfile.OutputSuffix
+    }
+
+    $suffix = [string]$Settings.OutputSuffix
+    if ([string]::IsNullOrWhiteSpace($suffix)) {
+        return '_mixed'
+    }
+    return $suffix
 }
 
 function ConvertTo-SavedSettings {
@@ -246,7 +362,9 @@ function ConvertTo-SavedSettings {
         [string[]]$TrackNameCandidates = $null,
         [string]$DelayMode = 'copy',
         [string]$ReencodeBitrate = '256k',
-        [object]$OffsetStepMs = 100
+        [object]$OffsetStepMs = 100,
+        [object]$AutoOffsetAlways = $false,
+        [object]$TrackCountProfiles = $null
     )
 
     $orderedNames = [ordered]@{}
@@ -271,10 +389,12 @@ function ConvertTo-SavedSettings {
         TrackNames          = $orderedNames
         LaterName           = $LaterName
         OutputSuffix        = $OutputSuffix
+        TrackCountProfiles  = ConvertTo-TrackCountProfiles $TrackCountProfiles
         TrackNameCandidates = @($candidates.ToArray())
         DelayMode           = ConvertTo-DelayMode $DelayMode
         ReencodeBitrate     = ConvertTo-ReencodeBitrate $ReencodeBitrate
         OffsetStepMs        = ConvertTo-OffsetStepMs $OffsetStepMs
+        AutoOffsetAlways    = ConvertTo-SettingFlag $AutoOffsetAlways
     }
 }
 
@@ -290,12 +410,17 @@ function Read-Settings {
             }
         }
         catch {
-            [System.Windows.Forms.MessageBox]::Show(
-                "設定ファイルを読み込めませんでした。初期設定で起動します。`r`n`r`n$($_.Exception.Message)",
-                'ffmpegMp4Mix GUI',
-                [System.Windows.Forms.MessageBoxButtons]::OK,
-                [System.Windows.Forms.MessageBoxIcon]::Warning
-            ) | Out-Null
+            if ($Script:CliMode) {
+                Write-Host "GUI版の設定ファイルを読み込めなかったため、初期設定を使います。$($_.Exception.Message)"
+            }
+            else {
+                [System.Windows.Forms.MessageBox]::Show(
+                    "設定ファイルを読み込めませんでした。初期設定で起動します。`r`n`r`n$($_.Exception.Message)",
+                    'ffmpegMp4Mix GUI',
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Warning
+                ) | Out-Null
+            }
             $settings = Read-BatchDefaultSettings
         }
     }
@@ -325,6 +450,8 @@ function Read-Settings {
         DelayMode       = [string]$settings.DelayMode
         ReencodeBitrate = [string]$settings.ReencodeBitrate
         OffsetStepMs    = $settings.OffsetStepMs
+        AutoOffsetAlways = $settings.AutoOffsetAlways
+        TrackCountProfiles = $settings.TrackCountProfiles
     }
     if ($null -ne $settings.PSObject.Properties['TrackNameCandidates']) {
         $convertParams.TrackNameCandidates = @(Get-TrackNameCandidates -Settings $settings)
@@ -340,39 +467,52 @@ function Save-Settings {
     Set-Content -LiteralPath $Script:ConfigPath -Value $json -Encoding UTF8
 }
 
+function Get-TrackNameDefaultsSignature {
+    param([object]$Settings)
+
+    $parts = New-Object System.Collections.ArrayList
+    [void]$parts.Add('later=' + [string]$Settings.LaterName)
+    $map = Get-TrackNameMap $Settings
+    foreach ($key in (Get-SortedTrackNameKeys $map)) {
+        [void]$parts.Add('0:' + $key + '=' + $map[$key])
+    }
+
+    $profiles = ConvertTo-TrackCountProfiles $Settings.TrackCountProfiles
+    foreach ($count in $profiles.Keys) {
+        $profileMap = Get-TrackNameMap $profiles[$count]
+        foreach ($key in (Get-SortedTrackNameKeys $profileMap)) {
+            [void]$parts.Add($count + ':' + $key + '=' + $profileMap[$key])
+        }
+    }
+    return ($parts -join "`n")
+}
+
 function Test-TrackNameDefaultsChanged {
     param(
         [object]$OldSettings,
         [object]$NewSettings
     )
 
-    if ([string]$OldSettings.LaterName -cne [string]$NewSettings.LaterName) {
-        return $true
-    }
-
-    $oldMap = Get-TrackNameMap $OldSettings
-    $newMap = Get-TrackNameMap $NewSettings
-    if ($oldMap.Count -ne $newMap.Count) {
-        return $true
-    }
-
-    foreach ($key in @($oldMap.Keys)) {
-        if (-not $newMap.ContainsKey($key) -or [string]$oldMap[$key] -cne [string]$newMap[$key]) {
-            return $true
-        }
-    }
-
-    return $false
+    return (Get-TrackNameDefaultsSignature $OldSettings) -cne (Get-TrackNameDefaultsSignature $NewSettings)
 }
 
 function Get-DefaultTrackName {
     param(
         [object]$Settings,
-        [int]$TrackIndex
+        [int]$TrackIndex,
+        [int]$TrackCount = 0
     )
 
-    $map = Get-TrackNameMap $Settings
     $key = [string]$TrackIndex
+    $countProfile = Get-TrackCountProfile -Settings $Settings -TrackCount $TrackCount
+    if ($null -ne $countProfile) {
+        $profileMap = Get-TrackNameMap $countProfile
+        if ($profileMap.ContainsKey($key) -and -not [string]::IsNullOrWhiteSpace($profileMap[$key])) {
+            return $profileMap[$key]
+        }
+    }
+
+    $map = Get-TrackNameMap $Settings
     if ($map.ContainsKey($key) -and -not [string]::IsNullOrWhiteSpace($map[$key])) {
         return $map[$key]
     }
@@ -387,7 +527,8 @@ function Get-DefaultTrackName {
 function Get-DefaultOutputPath {
     param(
         [string]$VideoFile,
-        [object]$Settings
+        [object]$Settings,
+        [int]$TrackCount = 0
     )
 
     if ([string]::IsNullOrWhiteSpace($VideoFile)) {
@@ -396,11 +537,7 @@ function Get-DefaultOutputPath {
 
     $directory = Split-Path -Parent $VideoFile
     $baseName = [System.IO.Path]::GetFileNameWithoutExtension($VideoFile)
-    $suffix = [string]$Settings.OutputSuffix
-    if ([string]::IsNullOrWhiteSpace($suffix)) {
-        $suffix = '_mixed'
-    }
-    Join-Path $directory ($baseName + $suffix + '.mp4')
+    Join-Path $directory ($baseName + (Get-OutputSuffix -Settings $Settings -TrackCount $TrackCount) + '.mp4')
 }
 
 function Test-VideoSelected {
@@ -518,7 +655,7 @@ function Initialize-InputFiles {
         $Script:AudioFiles += [System.IO.Path]::GetFullPath($inputFiles[$index])
     }
 
-    $Script:DefaultOutputPath = Get-DefaultOutputPath -VideoFile $Script:VideoFile -Settings $Settings
+    $Script:DefaultOutputPath = Get-DefaultOutputPath -VideoFile $Script:VideoFile -Settings $Settings -TrackCount $Script:AudioFiles.Count
 }
 
 function ConvertTo-CommandLineArgument {
@@ -589,15 +726,166 @@ function New-TrackItem {
         [string]$SourceFile,
         [bool]$IsVideoAudio,
         [string]$Title,
-        [int]$OffsetMs = 0
+        [int]$OffsetMs = 0,
+        [string]$OffsetNote = '',
+        [string]$OffsetNoteLevel = ''
     )
 
     [PSCustomObject]@{
-        SourceFile   = $SourceFile
-        IsVideoAudio = $IsVideoAudio
-        Title        = $Title
-        OffsetMs     = $OffsetMs
-        InputIndex   = $null
+        SourceFile      = $SourceFile
+        IsVideoAudio    = $IsVideoAudio
+        Title           = $Title
+        OffsetMs        = $OffsetMs
+        OffsetNote      = $OffsetNote
+        OffsetNoteLevel = $OffsetNoteLevel
+        InputIndex      = $null
+    }
+}
+
+function Format-AutoOffsetNote {
+    param([object]$Result)
+
+    $offsetText = (Format-OffsetMs ([int]$Result.OffsetMs)) + 'ms'
+    switch ([string]$Result.Level) {
+        '高' { $note = "自動調整: ${offsetText}（信頼度: 高）" }
+        '中' { $note = "自動調整: ${offsetText}（信頼度: 中）。念のため確認してください。" }
+        default { $note = "自動調整: 判定できなかったため変更していません（候補: ${offsetText}、信頼度: 低）。" }
+    }
+    if ($Result.EdgeWarning) {
+        $note += "`r`nずれが探せる範囲（±180秒）を超えている可能性があります。"
+    }
+    if ($Result.DriftWarning) {
+        $note += "`r`n" + ('テンポか長さが違う可能性があります（曲の途中で最大 {0:0}ms ずれます）。' -f $Result.DriftMs)
+    }
+    return $note
+}
+
+function ConvertTo-BatchValue {
+    param(
+        [string]$Value,
+        [switch]$ForEcho
+    )
+
+    $text = ([string]$Value) -replace "[`r`n]+", ' '
+    $text = $text.Replace('"', '')
+    if ($ForEcho) {
+        $text = $text -replace '[&<>|^]', ' '
+    }
+    return $text.Replace('%', '%%')
+}
+
+function Write-CliDefaults {
+    param(
+        [string[]]$InputFiles,
+        [bool]$UseVideoAudio,
+        [string]$OutFile
+    )
+
+    Initialize-InputFiles -InputFiles $InputFiles -Settings $Script:Settings
+    $tracks = @()
+    if ($UseVideoAudio -and (Test-VideoSelected)) {
+        $tracks += [PSCustomObject]@{ SourceFile = $Script:VideoFile; IsVideoAudio = $true }
+    }
+    foreach ($audioFile in $Script:AudioFiles) {
+        $tracks += [PSCustomObject]@{ SourceFile = $audioFile; IsVideoAudio = $false }
+    }
+    $trackCount = $tracks.Count
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('set "CLI_OUTPUT_SUFFIX=' + (ConvertTo-BatchValue (Get-OutputSuffix -Settings $Script:Settings -TrackCount $trackCount)) + '"')
+    $lines.Add('set "CLI_DELAY_MODE=' + (ConvertTo-DelayMode $Script:Settings.DelayMode) + '"')
+    $lines.Add('set "CLI_REENCODE_BITRATE=' + (ConvertTo-ReencodeBitrate $Script:Settings.ReencodeBitrate) + '"')
+
+    $reference = $null
+    $ffmpegPath = Get-SupportFilePath -FileName 'ffmpeg.exe'
+    $autoOffset = (ConvertTo-SettingFlag $Script:Settings.AutoOffsetAlways) -and (Test-VideoSelected)
+    if ($autoOffset) {
+        Write-Host '自動調整: 動画の音声を解析しています...'
+        try {
+            $reference = [AudioOffsetAnalyzer]::Load($ffmpegPath, $Script:VideoFile)
+        }
+        catch {
+            Write-Host '自動調整: 動画の音声を解析できなかったため、自動調整をしません。'
+            $autoOffset = $false
+        }
+    }
+
+    for ($index = 0; $index -lt $trackCount; $index++) {
+        $position = $index + 1
+        $track = $tracks[$index]
+        $name = Get-DefaultTrackName -Settings $Script:Settings -TrackIndex $position -TrackCount $trackCount
+        $offsetMs = 0
+        $level = ''
+        $note = ''
+        if ($autoOffset -and -not $track.IsVideoAudio) {
+            Write-Host ('自動調整中 ({0}/{1}): {2}' -f $position, $trackCount, [System.IO.Path]::GetFileName($track.SourceFile))
+            try {
+                $result = [AudioOffsetAnalyzer]::Analyze($reference, [AudioOffsetAnalyzer]::Load($ffmpegPath, $track.SourceFile))
+                $note = Format-AutoOffsetNote $result
+                switch ([string]$result.Level) {
+                    '高' { $level = 'high' }
+                    '中' { $level = 'medium' }
+                    default { $level = 'low' }
+                }
+                if ($level -ne 'low') {
+                    $offsetMs = [int]$result.OffsetMs
+                }
+            }
+            catch {
+                $level = 'low'
+                $note = '自動調整できませんでした: ' + $_.Exception.GetBaseException().Message
+            }
+        }
+
+        $lines.Add(('set "CLI_NAME_{0}={1}"' -f $position, (ConvertTo-BatchValue $name)))
+        $lines.Add(('set "CLI_OFFSET_{0}={1}"' -f $position, (Format-OffsetMs $offsetMs)))
+        $lines.Add(('set "CLI_LEVEL_{0}={1}"' -f $position, $level))
+        $lines.Add(('set "CLI_NOTE_{0}={1}"' -f $position, (ConvertTo-BatchValue $note -ForEcho)))
+    }
+    $lines.Add('set "CLI_DEFAULTS_LOADED=1"')
+    [System.IO.File]::WriteAllLines($OutFile, $lines, [System.Text.Encoding]::GetEncoding(932))
+}
+
+function Get-AutoOffsetReference {
+    param(
+        [string]$FfmpegPath,
+        [string]$VideoFile
+    )
+
+    $file = Get-Item -LiteralPath $VideoFile
+    $cache = $Script:AutoOffsetReference
+    if ($null -ne $cache -and $cache.Path -eq $file.FullName -and $cache.Length -eq $file.Length -and $cache.WriteTicks -eq $file.LastWriteTimeUtc.Ticks) {
+        return $cache.Features
+    }
+
+    $features = [AudioOffsetAnalyzer]::Load($FfmpegPath, $file.FullName)
+    $Script:AutoOffsetReference = [PSCustomObject]@{
+        Path       = $file.FullName
+        Length     = $file.Length
+        WriteTicks = $file.LastWriteTimeUtc.Ticks
+        Features   = $features
+    }
+    return $features
+}
+
+function Set-OffsetCellNote {
+    param(
+        [System.Windows.Forms.DataGridViewRow]$Row,
+        [string]$Note,
+        [string]$NoteLevel
+    )
+
+    $cell = $Row.Cells[2]
+    $cell.ToolTipText = $Note
+    switch ($NoteLevel) {
+        'warn' { $cell.Style.BackColor = Get-UiColor 'WarningSoft' }
+        'error' { $cell.Style.BackColor = Get-UiColor 'DangerSoft' }
+        default { $cell.Style.BackColor = [System.Drawing.Color]::Empty }
+    }
+
+    if ($null -ne $Row.Tag) {
+        $Row.Tag.OffsetNote = $Note
+        $Row.Tag.OffsetNoteLevel = $NoteLevel
     }
 }
 
@@ -618,6 +906,8 @@ function Copy-TrackOffsets {
             if ([bool]$sourceItem.IsVideoAudio -eq [bool]$item.IsVideoAudio -and
                 ([string]$sourceItem.SourceFile).Equals([string]$item.SourceFile, [System.StringComparison]::OrdinalIgnoreCase)) {
                 $item.OffsetMs = [int]$sourceItem.OffsetMs
+                $item.OffsetNote = [string]$sourceItem.OffsetNote
+                $item.OffsetNoteLevel = [string]$sourceItem.OffsetNoteLevel
                 $remaining.RemoveAt($index)
                 break
             }
@@ -633,17 +923,6 @@ function Show-ErrorMessage {
         'ffmpegMp4Mix GUI',
         [System.Windows.Forms.MessageBoxButtons]::OK,
         [System.Windows.Forms.MessageBoxIcon]::Error
-    ) | Out-Null
-}
-
-function Show-InfoMessage {
-    param([string]$Message)
-
-    [System.Windows.Forms.MessageBox]::Show(
-        $Message,
-        'ffmpegMp4Mix GUI',
-        [System.Windows.Forms.MessageBoxButtons]::OK,
-        [System.Windows.Forms.MessageBoxIcon]::Information
     ) | Out-Null
 }
 
@@ -673,6 +952,7 @@ function Get-UiColor {
         'AccentSoft' { return (New-UiColor 219 234 254) }
         'Danger' { return (New-UiColor 220 38 38) }
         'DangerSoft' { return (New-UiColor 254 242 242) }
+        'WarningSoft' { return (New-UiColor 255 247 214) }
         default { return (New-UiColor 255 255 255) }
     }
 }
@@ -1004,6 +1284,7 @@ function Add-TrackRow {
     $rowIndex = $Grid.Rows.Add('', $Item.Title, (Format-OffsetMs ([int]$Item.OffsetMs)), (Get-TrackTypeText $Item), (Get-TrackSourceText $Item))
     $Grid.Rows[$rowIndex].Cells[4].ToolTipText = [string]$Item.SourceFile
     $Grid.Rows[$rowIndex].Tag = $Item
+    Set-OffsetCellNote -Row $Grid.Rows[$rowIndex] -Note ([string]$Item.OffsetNote) -NoteLevel ([string]$Item.OffsetNoteLevel)
 }
 
 function Get-TrackItemsFromGrid {
@@ -1031,7 +1312,9 @@ function Get-TrackItemsFromGrid {
             -SourceFile ([string]$tag.SourceFile) `
             -IsVideoAudio ([bool]$tag.IsVideoAudio) `
             -Title ([string]$row.Cells[1].Value) `
-            -OffsetMs $offsetMs
+            -OffsetMs $offsetMs `
+            -OffsetNote ([string]$tag.OffsetNote) `
+            -OffsetNoteLevel ([string]$tag.OffsetNoteLevel)
     }
     return $items
 }
@@ -1075,16 +1358,14 @@ function Add-TrackFilesToGrid {
 
     $firstAddedRow = -1
     $addedCount = 0
+    $validFiles = @($FilePaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) })
+    $trackCount = $Grid.Rows.Count + $validFiles.Count
 
-    foreach ($filePath in $FilePaths) {
-        if ([string]::IsNullOrWhiteSpace($filePath) -or -not (Test-Path -LiteralPath $filePath -PathType Leaf)) {
-            continue
-        }
-
+    foreach ($filePath in $validFiles) {
         $fullPath = [System.IO.Path]::GetFullPath($filePath)
         $Script:AudioFiles += $fullPath
         $trackIndex = $Grid.Rows.Count + 1
-        $title = Get-DefaultTrackName -Settings $Settings -TrackIndex $trackIndex
+        $title = Get-DefaultTrackName -Settings $Settings -TrackIndex $trackIndex -TrackCount $trackCount
         $item = New-TrackItem -SourceFile $fullPath -IsVideoAudio $false -Title $title
         Add-TrackRow -Grid $Grid -Item $item
 
@@ -1366,7 +1647,11 @@ function Invoke-Ffmpeg {
     }
 
     $arguments = @(Build-FfmpegArguments -TrackItems $TrackItems -OutputPath $OutputPath -Settings $Script:Settings)
-    if (Test-Path -LiteralPath $OutputPath) {
+    $fullOutputPath = [System.IO.Path]::GetFullPath($OutputPath)
+    if ((Test-Path -LiteralPath $OutputPath) -and $Script:SavedOutputPaths.Contains($fullOutputPath)) {
+        $arguments = @('-y') + $arguments
+    }
+    elseif (Test-Path -LiteralPath $OutputPath) {
         $answer = [System.Windows.Forms.MessageBox]::Show(
             "出力ファイルはすでに存在します。上書きしますか？`r`n`r`n$OutputPath",
             'ffmpegMp4Mix GUI',
@@ -1399,9 +1684,14 @@ function Invoke-Ffmpeg {
         $logPath = [System.IO.Path]::ChangeExtension($OutputPath, '.ffmpeg.log')
         $logText = (Get-CommandLine -FileName $ffmpegPath -Arguments $arguments) + "`r`n`r`n" + $stderr
         [System.IO.File]::WriteAllText($logPath, $logText, [System.Text.Encoding]::UTF8)
-        throw "ffmpeg がエラー終了しました。ログを保存しました。`r`n`r`n$logPath"
+        $message = "ffmpeg がエラー終了しました。ログを保存しました。`r`n`r`n$logPath"
+        if ($stderr -match 'Error opening output') {
+            $message += "`r`n`r`n出力ファイルがプレイヤーなどで開かれている可能性があります。閉じてから保存し直してください。"
+        }
+        throw $message
     }
 
+    [void]$Script:SavedOutputPaths.Add($fullOutputPath)
     return $true
 }
 
@@ -1415,16 +1705,64 @@ function Show-SettingsDialog {
     $dialog.MinimumSize = New-Object System.Drawing.Size(520, 592)
     Set-FormTheme -Form $dialog
 
+    $editor = [PSCustomObject]@{
+        Common       = @{ Names = (Get-TrackNameMap $CurrentSettings); Suffix = [string]$CurrentSettings.OutputSuffix }
+        Profiles     = @{}
+        Current      = 0
+        CurrentIndex = 0
+        Suppress     = $false
+    }
+    $savedProfiles = ConvertTo-TrackCountProfiles $CurrentSettings.TrackCountProfiles
+    foreach ($key in $savedProfiles.Keys) {
+        $editor.Profiles[[int]$key] = @{ Names = (Get-TrackNameMap $savedProfiles[$key]); Suffix = [string]$savedProfiles[$key].OutputSuffix }
+    }
+
+    $comboCounts = New-Object System.Collections.ArrayList
+    [void]$comboCounts.Add(0)
+    foreach ($count in @(@(1..10) + @($editor.Profiles.Keys) | Sort-Object -Unique)) {
+        [void]$comboCounts.Add([int]$count)
+    }
+
+    $profileLabel = New-Object System.Windows.Forms.Label
+    $profileLabel.Text = 'トラック数'
+    $profileLabel.Location = New-Object System.Drawing.Point(12, 15)
+    $profileLabel.Size = New-Object System.Drawing.Size(70, 22)
+    $profileLabel.Anchor = 'Left,Top'
+    Set-LabelTheme -Label $profileLabel -Muted
+
+    $profileCombo = New-Object System.Windows.Forms.ComboBox
+    $profileCombo.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+    $profileCombo.Location = New-Object System.Drawing.Point(88, 12)
+    $profileCombo.Size = New-Object System.Drawing.Size(210, 22)
+    $profileCombo.Anchor = 'Left,Top'
+    $profileCombo.TabIndex = 0
+    Set-ComboBoxTheme -ComboBox $profileCombo
+
+    $profileCheck = New-Object System.Windows.Forms.CheckBox
+    $profileCheck.Text = 'このトラック数専用の設定にする'
+    $profileCheck.Location = New-Object System.Drawing.Point(310, 13)
+    $profileCheck.Size = New-Object System.Drawing.Size(222, 24)
+    $profileCheck.Anchor = 'Left,Top'
+    $profileCheck.TabIndex = 1
+    Set-CheckBoxTheme -CheckBox $profileCheck
+
+    $profileHint = New-Object System.Windows.Forms.Label
+    $profileHint.Text = '専用の設定がないトラック数で使います'
+    $profileHint.Location = New-Object System.Drawing.Point(310, 15)
+    $profileHint.Size = New-Object System.Drawing.Size(222, 22)
+    $profileHint.Anchor = 'Left,Top'
+    Set-LabelTheme -Label $profileHint -Muted
+
     $grid = New-Object System.Windows.Forms.DataGridView
-    $grid.Location = New-Object System.Drawing.Point(12, 12)
-    $grid.Size = New-Object System.Drawing.Size(520, 180)
+    $grid.Location = New-Object System.Drawing.Point(12, 44)
+    $grid.Size = New-Object System.Drawing.Size(520, 150)
     $grid.Anchor = 'Top,Left,Right'
     $grid.AllowUserToAddRows = $false
     $grid.AllowUserToDeleteRows = $false
     $grid.AutoSizeColumnsMode = 'Fill'
     $grid.SelectionMode = 'FullRowSelect'
     $grid.MultiSelect = $false
-    $grid.TabIndex = 0
+    $grid.TabIndex = 2
     Set-GridTheme -Grid $grid
 
     $numberColumn = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
@@ -1437,26 +1775,41 @@ function Show-SettingsDialog {
     $nameColumn.FillWeight = 75
     $grid.Columns.Add($nameColumn) | Out-Null
 
-    $map = Get-TrackNameMap $CurrentSettings
-    foreach ($key in (Get-SortedTrackNameKeys $map)) {
-        $grid.Rows.Add($key, $map[$key]) | Out-Null
-    }
-
     $addButton = New-Object System.Windows.Forms.Button
     $addButton.Text = '+ 追加'
-    $addButton.Location = New-Object System.Drawing.Point(12, 204)
+    $addButton.Location = New-Object System.Drawing.Point(12, 200)
     $addButton.Size = New-Object System.Drawing.Size(80, 28)
     $addButton.Anchor = 'Left,Top'
-    $addButton.TabIndex = 1
+    $addButton.TabIndex = 3
     Set-ButtonTheme -Button $addButton
 
     $deleteButton = New-Object System.Windows.Forms.Button
     $deleteButton.Text = '- 削除'
-    $deleteButton.Location = New-Object System.Drawing.Point(98, 204)
+    $deleteButton.Location = New-Object System.Drawing.Point(98, 200)
     $deleteButton.Size = New-Object System.Drawing.Size(80, 28)
     $deleteButton.Anchor = 'Left,Top'
-    $deleteButton.TabIndex = 2
+    $deleteButton.TabIndex = 4
     Set-ButtonTheme -Button $deleteButton -Kind Danger
+
+    $suffixLabel = New-Object System.Windows.Forms.Label
+    $suffixLabel.Text = '出力接尾語'
+    $suffixLabel.Location = New-Object System.Drawing.Point(196, 205)
+    $suffixLabel.Size = New-Object System.Drawing.Size(80, 22)
+    $suffixLabel.Anchor = 'Left,Top'
+    Set-LabelTheme -Label $suffixLabel -Muted
+
+    $suffixText = New-Object System.Windows.Forms.TextBox
+    $suffixText.Location = New-Object System.Drawing.Point(282, 202)
+    $suffixText.Size = New-Object System.Drawing.Size(250, 22)
+    $suffixText.Anchor = 'Top,Left,Right'
+    $suffixText.TabIndex = 5
+    Set-TextBoxTheme -TextBox $suffixText
+
+    $separator = New-Object System.Windows.Forms.Label
+    $separator.Location = New-Object System.Drawing.Point(12, 238)
+    $separator.Size = New-Object System.Drawing.Size(520, 1)
+    $separator.Anchor = 'Top,Left,Right'
+    $separator.BackColor = Get-UiColor 'Border'
 
     $candidateLabel = New-Object System.Windows.Forms.Label
     $candidateLabel.Text = 'トラック名候補 (1行1件)'
@@ -1473,7 +1826,7 @@ function Show-SettingsDialog {
     $candidateText.Location = New-Object System.Drawing.Point(12, 270)
     $candidateText.Size = New-Object System.Drawing.Size(520, 88)
     $candidateText.Anchor = 'Top,Left,Right'
-    $candidateText.TabIndex = 3
+    $candidateText.TabIndex = 6
     Set-TextBoxTheme -TextBox $candidateText
 
     $laterLabel = New-Object System.Windows.Forms.Label
@@ -1488,27 +1841,12 @@ function Show-SettingsDialog {
     $laterText.Location = New-Object System.Drawing.Point(158, 371)
     $laterText.Size = New-Object System.Drawing.Size(374, 22)
     $laterText.Anchor = 'Left,Right,Bottom'
-    $laterText.TabIndex = 4
+    $laterText.TabIndex = 7
     Set-TextBoxTheme -TextBox $laterText
-
-    $suffixLabel = New-Object System.Windows.Forms.Label
-    $suffixLabel.Text = '出力接尾語'
-    $suffixLabel.Location = New-Object System.Drawing.Point(12, 406)
-    $suffixLabel.Size = New-Object System.Drawing.Size(140, 22)
-    $suffixLabel.Anchor = 'Left,Bottom'
-    Set-LabelTheme -Label $suffixLabel -Muted
-
-    $suffixText = New-Object System.Windows.Forms.TextBox
-    $suffixText.Text = [string]$CurrentSettings.OutputSuffix
-    $suffixText.Location = New-Object System.Drawing.Point(158, 403)
-    $suffixText.Size = New-Object System.Drawing.Size(374, 22)
-    $suffixText.Anchor = 'Left,Right,Bottom'
-    $suffixText.TabIndex = 5
-    Set-TextBoxTheme -TextBox $suffixText
 
     $delayModeLabel = New-Object System.Windows.Forms.Label
     $delayModeLabel.Text = '遅らせる方法'
-    $delayModeLabel.Location = New-Object System.Drawing.Point(12, 438)
+    $delayModeLabel.Location = New-Object System.Drawing.Point(12, 406)
     $delayModeLabel.Size = New-Object System.Drawing.Size(140, 22)
     $delayModeLabel.Anchor = 'Left,Bottom'
     Set-LabelTheme -Label $delayModeLabel -Muted
@@ -1518,49 +1856,58 @@ function Show-SettingsDialog {
     [void]$delayModeCombo.Items.Add('コピー（再エンコードなし）')
     [void]$delayModeCombo.Items.Add('再エンコード（AAC）')
     $delayModeCombo.SelectedIndex = if ((ConvertTo-DelayMode $CurrentSettings.DelayMode) -eq 'reencode') { 1 } else { 0 }
-    $delayModeCombo.Location = New-Object System.Drawing.Point(158, 435)
+    $delayModeCombo.Location = New-Object System.Drawing.Point(158, 403)
     $delayModeCombo.Size = New-Object System.Drawing.Size(374, 22)
     $delayModeCombo.Anchor = 'Left,Right,Bottom'
-    $delayModeCombo.TabIndex = 6
+    $delayModeCombo.TabIndex = 8
     Set-ComboBoxTheme -ComboBox $delayModeCombo
 
     $bitrateLabel = New-Object System.Windows.Forms.Label
     $bitrateLabel.Text = 'ビットレート'
-    $bitrateLabel.Location = New-Object System.Drawing.Point(12, 470)
+    $bitrateLabel.Location = New-Object System.Drawing.Point(12, 438)
     $bitrateLabel.Size = New-Object System.Drawing.Size(140, 22)
     $bitrateLabel.Anchor = 'Left,Bottom'
     Set-LabelTheme -Label $bitrateLabel -Muted
 
     $bitrateText = New-Object System.Windows.Forms.TextBox
     $bitrateText.Text = ConvertTo-ReencodeBitrate $CurrentSettings.ReencodeBitrate
-    $bitrateText.Location = New-Object System.Drawing.Point(158, 467)
+    $bitrateText.Location = New-Object System.Drawing.Point(158, 435)
     $bitrateText.Size = New-Object System.Drawing.Size(120, 22)
     $bitrateText.Anchor = 'Left,Bottom'
-    $bitrateText.TabIndex = 7
+    $bitrateText.TabIndex = 9
     $bitrateText.Enabled = $delayModeCombo.SelectedIndex -eq 1
     Set-TextBoxTheme -TextBox $bitrateText
 
     $offsetStepLabel = New-Object System.Windows.Forms.Label
     $offsetStepLabel.Text = 'オフセット増減幅(ms)'
-    $offsetStepLabel.Location = New-Object System.Drawing.Point(12, 502)
+    $offsetStepLabel.Location = New-Object System.Drawing.Point(12, 470)
     $offsetStepLabel.Size = New-Object System.Drawing.Size(140, 22)
     $offsetStepLabel.Anchor = 'Left,Bottom'
     Set-LabelTheme -Label $offsetStepLabel -Muted
 
     $offsetStepText = New-Object System.Windows.Forms.TextBox
     $offsetStepText.Text = [string](ConvertTo-OffsetStepMs $CurrentSettings.OffsetStepMs)
-    $offsetStepText.Location = New-Object System.Drawing.Point(158, 499)
+    $offsetStepText.Location = New-Object System.Drawing.Point(158, 467)
     $offsetStepText.Size = New-Object System.Drawing.Size(120, 22)
     $offsetStepText.Anchor = 'Left,Bottom'
-    $offsetStepText.TabIndex = 8
+    $offsetStepText.TabIndex = 10
     Set-TextBoxTheme -TextBox $offsetStepText
+
+    $autoOffsetCheck = New-Object System.Windows.Forms.CheckBox
+    $autoOffsetCheck.Text = '自動調整を常に行う（開いたとき・トラック追加時・動画変更時）'
+    $autoOffsetCheck.Checked = ConvertTo-SettingFlag $CurrentSettings.AutoOffsetAlways
+    $autoOffsetCheck.Location = New-Object System.Drawing.Point(12, 500)
+    $autoOffsetCheck.Size = New-Object System.Drawing.Size(520, 24)
+    $autoOffsetCheck.Anchor = 'Left,Right,Bottom'
+    $autoOffsetCheck.TabIndex = 11
+    Set-CheckBoxTheme -CheckBox $autoOffsetCheck
 
     $okButton = New-Object System.Windows.Forms.Button
     $okButton.Text = '保存'
     $okButton.Location = New-Object System.Drawing.Point(356, 586)
     $okButton.Size = New-Object System.Drawing.Size(84, 30)
     $okButton.Anchor = 'Right,Bottom'
-    $okButton.TabIndex = 9
+    $okButton.TabIndex = 12
     Set-ButtonTheme -Button $okButton -Kind Primary
 
     $cancelButton = New-Object System.Windows.Forms.Button
@@ -1568,9 +1915,179 @@ function Show-SettingsDialog {
     $cancelButton.Location = New-Object System.Drawing.Point(448, 586)
     $cancelButton.Size = New-Object System.Drawing.Size(84, 30)
     $cancelButton.Anchor = 'Right,Bottom'
-    $cancelButton.TabIndex = 10
+    $cancelButton.TabIndex = 13
     $cancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     Set-ButtonTheme -Button $cancelButton
+
+    function Get-ProfileItemText {
+        param([int]$Count)
+
+        if ($Count -eq 0) {
+            return '共通（下記以外のトラック数）'
+        }
+        $text = '{0}トラックのとき' -f $Count
+        if ($editor.Profiles.ContainsKey($Count)) {
+            $text += '（専用）'
+        }
+        return $text
+    }
+
+    function Update-ProfileItemTexts {
+        $editor.Suppress = $true
+        try {
+            $selected = $profileCombo.SelectedIndex
+            for ($index = 0; $index -lt $comboCounts.Count; $index++) {
+                $text = Get-ProfileItemText ([int]$comboCounts[$index])
+                if ([string]$profileCombo.Items[$index] -ne $text) {
+                    $profileCombo.Items[$index] = $text
+                }
+            }
+            $profileCombo.SelectedIndex = $selected
+        }
+        finally {
+            $editor.Suppress = $false
+        }
+    }
+
+    function Get-InheritedNames {
+        param([int]$Count)
+
+        $later = ([string]$laterText.Text).Trim()
+        if ([string]::IsNullOrWhiteSpace($later)) {
+            $later = 'トラック'
+        }
+
+        $names = @{}
+        for ($number = 1; $number -le $Count; $number++) {
+            $key = [string]$number
+            if ($editor.Common.Names.ContainsKey($key) -and -not [string]::IsNullOrWhiteSpace([string]$editor.Common.Names[$key])) {
+                $names[$key] = [string]$editor.Common.Names[$key]
+            }
+            else {
+                $names[$key] = $later
+            }
+        }
+        return $names
+    }
+
+    function Read-NameGrid {
+        [void]$grid.EndEdit()
+        $names = @{}
+        foreach ($row in $grid.Rows) {
+            if ($row.IsNewRow) {
+                continue
+            }
+
+            $numberText = [string]$row.Cells[0].Value
+            $nameText = [string]$row.Cells[1].Value
+            $number = 0
+            if (-not [int]::TryParse($numberText, [ref]$number) -or $number -le 0) {
+                Show-ErrorMessage 'トラック番号には1以上の数字を入力してください。'
+                return $null
+            }
+            if ([string]::IsNullOrWhiteSpace($nameText)) {
+                Show-ErrorMessage '初期トラック名を入力してください。'
+                return $null
+            }
+            $names[[string]$number] = $nameText
+        }
+        return $names
+    }
+
+    function Save-EditingProfile {
+        $isCommon = $editor.Current -eq 0
+        if (-not $isCommon -and -not $editor.Profiles.ContainsKey($editor.Current)) {
+            return $true
+        }
+
+        $names = Read-NameGrid
+        if ($null -eq $names) {
+            return $false
+        }
+
+        $entry = @{ Names = $names; Suffix = ([string]$suffixText.Text).Trim() }
+        if ($isCommon) {
+            $editor.Common = $entry
+        }
+        else {
+            $editor.Profiles[$editor.Current] = $entry
+        }
+        return $true
+    }
+
+    function Show-EditingProfile {
+        $count = $editor.Current
+        $isCommon = $count -eq 0
+        $hasProfile = (-not $isCommon) -and $editor.Profiles.ContainsKey($count)
+        $editable = $isCommon -or $hasProfile
+
+        $editor.Suppress = $true
+        $profileCheck.Visible = -not $isCommon
+        $profileCheck.Checked = $hasProfile
+        $profileHint.Visible = $isCommon
+        $editor.Suppress = $false
+
+        if ($isCommon) {
+            $entry = $editor.Common
+        }
+        elseif ($hasProfile) {
+            $entry = $editor.Profiles[$count]
+        }
+        else {
+            $entry = @{ Names = (Get-InheritedNames $count); Suffix = [string]$editor.Common.Suffix }
+        }
+
+        $grid.Rows.Clear()
+        foreach ($key in (Get-SortedTrackNameKeys $entry.Names)) {
+            [void]$grid.Rows.Add($key, $entry.Names[$key])
+        }
+        $suffixText.Text = [string]$entry.Suffix
+
+        $textColor = if ($editable) { Get-UiColor 'Text' } else { Get-UiColor 'MutedText' }
+        $grid.ReadOnly = -not $editable
+        $grid.DefaultCellStyle.ForeColor = $textColor
+        $grid.AlternatingRowsDefaultCellStyle.ForeColor = $textColor
+        $suffixText.ReadOnly = -not $editable
+        $suffixText.ForeColor = $textColor
+        $addButton.Enabled = $editable
+        $deleteButton.Enabled = $editable
+        if ($grid.Rows.Count -gt 0) {
+            $grid.CurrentCell = $grid.Rows[0].Cells[1]
+        }
+    }
+
+    $profileCombo.Add_SelectedIndexChanged({
+        if ($editor.Suppress) {
+            return
+        }
+
+        $newIndex = $profileCombo.SelectedIndex
+        if (-not (Save-EditingProfile)) {
+            $editor.Suppress = $true
+            $profileCombo.SelectedIndex = $editor.CurrentIndex
+            $editor.Suppress = $false
+            return
+        }
+
+        $editor.CurrentIndex = $newIndex
+        $editor.Current = [int]$comboCounts[$newIndex]
+        Show-EditingProfile
+    })
+
+    $profileCheck.Add_CheckedChanged({
+        if ($editor.Suppress -or $editor.Current -eq 0) {
+            return
+        }
+
+        if ($profileCheck.Checked) {
+            $editor.Profiles[$editor.Current] = @{ Names = (Get-InheritedNames $editor.Current); Suffix = [string]$editor.Common.Suffix }
+        }
+        else {
+            [void]$editor.Profiles.Remove($editor.Current)
+        }
+        Update-ProfileItemTexts
+        Show-EditingProfile
+    })
 
     $addButton.Add_Click({
         $max = 0
@@ -1599,27 +2116,14 @@ function Show-SettingsDialog {
     })
 
     $okButton.Add_Click({
-        $grid.EndEdit()
-        $trackNames = @{}
-        foreach ($row in $grid.Rows) {
-            if ($row.IsNewRow) {
-                continue
-            }
-
-            $numberText = [string]$row.Cells[0].Value
-            $nameText = [string]$row.Cells[1].Value
-            $number = 0
-            if (-not [int]::TryParse($numberText, [ref]$number) -or $number -le 0) {
-                Show-ErrorMessage 'トラック番号には1以上の数字を入力してください。'
-                return
-            }
-            if ([string]::IsNullOrWhiteSpace($nameText)) {
-                Show-ErrorMessage '初期トラック名を入力してください。'
-                return
-            }
-            $trackNames[[string]$number] = $nameText
+        if (-not (Save-EditingProfile)) {
+            return
         }
 
+        $trackNames = @{}
+        foreach ($key in @($editor.Common.Names.Keys)) {
+            $trackNames[[string]$key] = [string]$editor.Common.Names[$key]
+        }
         if (-not $trackNames.ContainsKey('1')) {
             $trackNames['1'] = 'オンボーカル'
         }
@@ -1632,7 +2136,7 @@ function Show-SettingsDialog {
             $later = 'トラック'
         }
 
-        $suffix = [string]$suffixText.Text
+        $suffix = [string]$editor.Common.Suffix
         if ([string]::IsNullOrWhiteSpace($suffix)) {
             $suffix = '_mixed'
         }
@@ -1650,8 +2154,14 @@ function Show-SettingsDialog {
             return
         }
 
+        $profiles = @{}
+        foreach ($count in @($editor.Profiles.Keys)) {
+            $entry = $editor.Profiles[$count]
+            $profiles[[string]$count] = [PSCustomObject]@{ TrackNames = $entry.Names; OutputSuffix = [string]$entry.Suffix }
+        }
+
         $candidates = @(ConvertTo-TrackNameCandidateList -Candidates $candidateText.Lines)
-        $newSettings = ConvertTo-SavedSettings -TrackNames $trackNames -LaterName $later -OutputSuffix $suffix -TrackNameCandidates $candidates -DelayMode $delayMode -ReencodeBitrate $bitrate -OffsetStepMs $offsetStepMs
+        $newSettings = ConvertTo-SavedSettings -TrackNames $trackNames -LaterName $later -OutputSuffix $suffix -TrackNameCandidates $candidates -DelayMode $delayMode -ReencodeBitrate $bitrate -OffsetStepMs $offsetStepMs -AutoOffsetAlways $autoOffsetCheck.Checked -TrackCountProfiles $profiles
         Save-Settings $newSettings
         $dialog.Tag = $newSettings
         $dialog.DialogResult = [System.Windows.Forms.DialogResult]::OK
@@ -1661,15 +2171,20 @@ function Show-SettingsDialog {
     $dialog.AcceptButton = $okButton
     $dialog.CancelButton = $cancelButton
     $dialog.Controls.AddRange(@(
-        $grid, $addButton, $deleteButton, $candidateLabel, $candidateText,
-        $laterLabel, $laterText, $suffixLabel, $suffixText,
+        $profileLabel, $profileCombo, $profileCheck, $profileHint,
+        $grid, $addButton, $deleteButton, $suffixLabel, $suffixText, $separator,
+        $candidateLabel, $candidateText, $laterLabel, $laterText,
         $delayModeLabel, $delayModeCombo, $bitrateLabel, $bitrateText,
-        $offsetStepLabel, $offsetStepText, $okButton, $cancelButton
+        $offsetStepLabel, $offsetStepText, $autoOffsetCheck, $okButton, $cancelButton
     ))
 
-    if ($grid.Rows.Count -gt 0) {
-        $grid.CurrentCell = $grid.Rows[0].Cells[1]
+    $editor.Suppress = $true
+    foreach ($count in $comboCounts) {
+        [void]$profileCombo.Items.Add((Get-ProfileItemText ([int]$count)))
     }
+    $profileCombo.SelectedIndex = 0
+    $editor.Suppress = $false
+    Show-EditingProfile
 
     $result = $dialog.ShowDialog()
     if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
@@ -1771,6 +2286,13 @@ function Show-MainForm {
     $allOffsetApplyButton.TabIndex = 13
     Set-ButtonTheme -Button $allOffsetApplyButton
 
+    $autoOffsetButton = New-Object System.Windows.Forms.Button
+    $autoOffsetButton.Text = '自動調整'
+    $autoOffsetButton.Location = New-Object System.Drawing.Point(610, 74)
+    $autoOffsetButton.Size = New-Object System.Drawing.Size(80, 28)
+    $autoOffsetButton.TabIndex = 14
+    Set-ButtonTheme -Button $autoOffsetButton
+
     $grid = New-Object TrackNameDataGridView
     $grid.Location = New-Object System.Drawing.Point(12, 108)
     $grid.Size = New-Object System.Drawing.Size(730, 296)
@@ -1869,7 +2391,7 @@ function Show-MainForm {
     $outputText.Location = New-Object System.Drawing.Point(88, 417)
     $outputText.Size = New-Object System.Drawing.Size(654, 22)
     $outputText.Anchor = 'Left,Right,Bottom'
-    $outputText.TabIndex = 14
+    $outputText.TabIndex = 15
     Set-TextBoxTheme -TextBox $outputText
 
     $browseButton = New-Object System.Windows.Forms.Button
@@ -1877,7 +2399,7 @@ function Show-MainForm {
     $browseButton.Location = New-Object System.Drawing.Point(754, 414)
     $browseButton.Size = New-Object System.Drawing.Size(94, 28)
     $browseButton.Anchor = 'Right,Bottom'
-    $browseButton.TabIndex = 15
+    $browseButton.TabIndex = 16
     Set-ButtonTheme -Button $browseButton
 
     $settingsButton = New-Object System.Windows.Forms.Button
@@ -1885,7 +2407,7 @@ function Show-MainForm {
     $settingsButton.Location = New-Object System.Drawing.Point(12, 484)
     $settingsButton.Size = New-Object System.Drawing.Size(94, 30)
     $settingsButton.Anchor = 'Left,Bottom'
-    $settingsButton.TabIndex = 16
+    $settingsButton.TabIndex = 17
     Set-ButtonTheme -Button $settingsButton
 
     $statusLabel = New-Object System.Windows.Forms.Label
@@ -1896,19 +2418,19 @@ function Show-MainForm {
     Set-LabelTheme -Label $statusLabel -Muted
 
     $okButton = New-Object System.Windows.Forms.Button
-    $okButton.Text = 'OK'
+    $okButton.Text = '保存'
     $okButton.Location = New-Object System.Drawing.Point(656, 484)
     $okButton.Size = New-Object System.Drawing.Size(92, 30)
     $okButton.Anchor = 'Right,Bottom'
-    $okButton.TabIndex = 17
+    $okButton.TabIndex = 18
     Set-ButtonTheme -Button $okButton -Kind Primary
 
     $cancelButton = New-Object System.Windows.Forms.Button
-    $cancelButton.Text = 'キャンセル'
+    $cancelButton.Text = '閉じる'
     $cancelButton.Location = New-Object System.Drawing.Point(756, 484)
     $cancelButton.Size = New-Object System.Drawing.Size(92, 30)
     $cancelButton.Anchor = 'Right,Bottom'
-    $cancelButton.TabIndex = 18
+    $cancelButton.TabIndex = 19
     $cancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     Set-ButtonTheme -Button $cancelButton
 
@@ -1920,6 +2442,13 @@ function Show-MainForm {
     $sourceColumnIndex = 4
     $offsetErrorMessage = 'オフセットは整数（ミリ秒）で入力してください。元の値に戻しました。'
     $allOffsetErrorMessage = '全トラックをずらす量は整数（ミリ秒）で入力してください。'
+    $autoOffsetState = [PSCustomObject]@{
+        Running     = $false
+        PendingAll  = $false
+        PendingRows = New-Object System.Collections.ArrayList
+    }
+    $autoOffsetTimer = New-Object System.Windows.Forms.Timer
+    $autoOffsetTimer.Interval = 150
     $trackDragState = [PSCustomObject]@{
         RowIndex = -1
         Box = [System.Drawing.Rectangle]::Empty
@@ -1936,6 +2465,7 @@ function Show-MainForm {
         $offsetToolTip.SetToolTip($allOffsetMinusButton, "全トラックを ${stepMs}ms 早める (Ctrl+Shift+↓)")
         $offsetToolTip.SetToolTip($allOffsetPlusButton, "全トラックを ${stepMs}ms 遅らせる (Ctrl+Shift+↑)")
         $offsetToolTip.SetToolTip($allOffsetText, '全トラックをずらす量（ミリ秒）。+ で遅らせる、- で早める')
+        $offsetToolTip.SetToolTip($autoOffsetButton, '動画の音声と聞き比べて、各トラックのオフセットを自動で合わせます')
     }
 
     function Step-TrackOffsets {
@@ -1994,6 +2524,9 @@ function Show-MainForm {
             $offsetMs += $DeltaMs
             $row.Cells[$offsetColumnIndex].Value = Format-OffsetMs $offsetMs
             $row.Tag.OffsetMs = $offsetMs
+            if (-not $AllTracks -or [string]$row.Tag.OffsetNoteLevel -ne 'error') {
+                Set-OffsetCellNote -Row $row -Note '' -NoteLevel ''
+            }
         }
 
         if ($statusLabel.Text -eq $offsetErrorMessage -or $statusLabel.Text -eq $allOffsetErrorMessage) {
@@ -2001,17 +2534,31 @@ function Show-MainForm {
         }
     }
 
+    function Get-TrackRowCount {
+        return @($grid.Rows | Where-Object { -not $_.IsNewRow -and $null -ne $_.Tag }).Count
+    }
+
+    function Update-DefaultOutputPath {
+        $oldDefault = [string]$Script:DefaultOutputPath
+        $Script:DefaultOutputPath = Get-DefaultOutputPath -VideoFile $Script:VideoFile -Settings $Script:Settings -TrackCount (Get-TrackRowCount)
+        if ([string]::IsNullOrWhiteSpace([string]$outputText.Text) -or $outputText.Text -eq $oldDefault) {
+            $outputText.Text = $Script:DefaultOutputPath
+        }
+    }
+
     function Reset-GridFromInputs {
         $previousItems = @(Get-TrackItemsFromGrid -Grid $grid)
+        $includeVideoAudio = $useVideoAudio.Checked -and (Test-VideoSelected)
+        $trackCount = @($Script:AudioFiles).Count + $(if ($includeVideoAudio) { 1 } else { 0 })
         $items = @()
         $trackNumber = 1
-        if ($useVideoAudio.Checked -and (Test-VideoSelected)) {
-            $items += New-TrackItem -SourceFile $Script:VideoFile -IsVideoAudio $true -Title (Get-DefaultTrackName -Settings $Script:Settings -TrackIndex $trackNumber)
+        if ($includeVideoAudio) {
+            $items += New-TrackItem -SourceFile $Script:VideoFile -IsVideoAudio $true -Title (Get-DefaultTrackName -Settings $Script:Settings -TrackIndex $trackNumber -TrackCount $trackCount)
             $trackNumber++
         }
 
         foreach ($audioFile in $Script:AudioFiles) {
-            $items += New-TrackItem -SourceFile $audioFile -IsVideoAudio $false -Title (Get-DefaultTrackName -Settings $Script:Settings -TrackIndex $trackNumber)
+            $items += New-TrackItem -SourceFile $audioFile -IsVideoAudio $false -Title (Get-DefaultTrackName -Settings $Script:Settings -TrackIndex $trackNumber -TrackCount $trackCount)
             $trackNumber++
         }
         Copy-TrackOffsets -Items $items -SourceItems $previousItems
@@ -2039,7 +2586,7 @@ function Show-MainForm {
 
         if ($Enabled -and (Test-VideoSelected)) {
             if ($null -eq $videoItem) {
-                $videoItem = New-TrackItem -SourceFile $Script:VideoFile -IsVideoAudio $true -Title (Get-DefaultTrackName -Settings $Script:Settings -TrackIndex 1)
+                $videoItem = New-TrackItem -SourceFile $Script:VideoFile -IsVideoAudio $true -Title (Get-DefaultTrackName -Settings $Script:Settings -TrackIndex 1 -TrackCount ($audioItems.Count + 1))
             }
             else {
                 $videoItem.SourceFile = $Script:VideoFile
@@ -2053,6 +2600,7 @@ function Show-MainForm {
 
         Set-TrackItemsToGrid -Grid $grid -Items $items
         Sync-AudioFilesFromGrid -Grid $grid
+        Update-DefaultOutputPath
     }
 
     function Update-VideoAudioRows {
@@ -2167,17 +2715,157 @@ function Show-MainForm {
             throw '動画ファイルには存在する .mp4 ファイルを指定してください。'
         }
 
-        $oldDefault = [string]$Script:DefaultOutputPath
         $Script:VideoFile = [System.IO.Path]::GetFullPath($VideoFile)
         $videoText.Text = $Script:VideoFile
         $useVideoAudio.Enabled = $true
-        $Script:DefaultOutputPath = Get-DefaultOutputPath -VideoFile $Script:VideoFile -Settings $Script:Settings
 
-        if ([string]::IsNullOrWhiteSpace([string]$outputText.Text) -or $outputText.Text -eq $oldDefault) {
-            $outputText.Text = $Script:DefaultOutputPath
+        foreach ($row in $grid.Rows) {
+            if (-not $row.IsNewRow -and $null -ne $row.Tag) {
+                Set-OffsetCellNote -Row $row -Note '' -NoteLevel ''
+            }
+        }
+        Update-VideoAudioRows
+        Update-DefaultOutputPath
+        Request-AutoOffset
+    }
+
+    function Request-AutoOffset {
+        param([object[]]$Rows = $null)
+
+        if (-not (ConvertTo-SettingFlag $Script:Settings.AutoOffsetAlways)) {
+            return
         }
 
-        Update-VideoAudioRows
+        if ($null -eq $Rows) {
+            $autoOffsetState.PendingAll = $true
+        }
+        else {
+            foreach ($row in $Rows) {
+                [void]$autoOffsetState.PendingRows.Add($row)
+            }
+        }
+        $autoOffsetTimer.Stop()
+        $autoOffsetTimer.Start()
+    }
+
+    function Invoke-AutoOffset {
+        param(
+            [object[]]$TargetRows = $null,
+            [switch]$Automatic
+        )
+
+        if ($autoOffsetState.Running) {
+            return
+        }
+
+        Complete-TrackNameEdit -Grid $grid -TrackNameColumnIndex $trackNameColumnIndex
+        if (-not (Test-VideoSelected) -or -not (Test-Path -LiteralPath $Script:VideoFile -PathType Leaf)) {
+            if (-not $Automatic) {
+                Show-ErrorMessage '動画ファイルを指定してください。'
+            }
+            return
+        }
+
+        $ffmpegPath = Get-SupportFilePath -FileName 'ffmpeg.exe'
+        if (-not (Test-Path -LiteralPath $ffmpegPath)) {
+            if ($Automatic) {
+                $statusLabel.Text = '自動調整: ffmpeg.exe が見つからないため調整できませんでした。'
+            }
+            else {
+                Show-ErrorMessage "ffmpeg.exe が見つかりません。`r`n$ffmpegPath"
+            }
+            return
+        }
+
+        $candidateRows = if ($null -eq $TargetRows) { @($grid.Rows) } else { @($TargetRows) }
+        $rows = @($candidateRows | Where-Object { $null -ne $_.DataGridView -and -not $_.IsNewRow -and $null -ne $_.Tag -and -not [bool]$_.Tag.IsVideoAudio })
+        if ($rows.Count -eq 0) {
+            if (-not $Automatic) {
+                Show-ErrorMessage '自動調整するトラックがありません。'
+            }
+            return
+        }
+
+        $disabledControls = @($form.Controls | Where-Object { $_.Enabled -and -not ($_ -is [System.Windows.Forms.Label]) })
+        foreach ($control in $disabledControls) {
+            $control.Enabled = $false
+        }
+        $autoOffsetState.Running = $true
+        $form.UseWaitCursor = $true
+        $applied = 0
+        $needsCheck = 0
+        $unchanged = 0
+        try {
+            $statusLabel.Text = '自動調整中: 動画の音声を解析しています...'
+            [System.Windows.Forms.Application]::DoEvents()
+            try {
+                $reference = Get-AutoOffsetReference -FfmpegPath $ffmpegPath -VideoFile $Script:VideoFile
+            }
+            catch {
+                $message = $_.Exception.GetBaseException().Message
+                if ($Automatic) {
+                    $statusLabel.Text = '自動調整: 動画の音声を解析できませんでした。'
+                }
+                else {
+                    $statusLabel.Text = ''
+                    Show-ErrorMessage ("動画の音声を解析できませんでした。`r`n`r`n" + $message)
+                }
+                return
+            }
+
+            for ($index = 0; $index -lt $rows.Count; $index++) {
+                $row = $rows[$index]
+                $sourceFile = [string]$row.Tag.SourceFile
+                $statusLabel.Text = '自動調整中 ({0}/{1}): {2}' -f ($index + 1), $rows.Count, [System.IO.Path]::GetFileName($sourceFile)
+                [System.Windows.Forms.Application]::DoEvents()
+
+                try {
+                    $result = [AudioOffsetAnalyzer]::Analyze($reference, [AudioOffsetAnalyzer]::Load($ffmpegPath, $sourceFile))
+                }
+                catch {
+                    Set-OffsetCellNote -Row $row -Note ('自動調整できませんでした: ' + $_.Exception.GetBaseException().Message) -NoteLevel 'error'
+                    $unchanged++
+                    continue
+                }
+
+                $note = Format-AutoOffsetNote $result
+                if ($result.Level -eq '低') {
+                    Set-OffsetCellNote -Row $row -Note $note -NoteLevel 'error'
+                    $unchanged++
+                    continue
+                }
+
+                $row.Cells[$offsetColumnIndex].Value = Format-OffsetMs ([int]$result.OffsetMs)
+                $row.Tag.OffsetMs = [int]$result.OffsetMs
+                if ($result.Level -eq '高' -and -not $result.DriftWarning) {
+                    Set-OffsetCellNote -Row $row -Note $note -NoteLevel ''
+                }
+                else {
+                    Set-OffsetCellNote -Row $row -Note $note -NoteLevel 'warn'
+                    $needsCheck++
+                }
+                $applied++
+            }
+
+            $parts = @('{0}件調整' -f $applied)
+            if ($needsCheck -gt 0) {
+                $parts += '{0}件は要確認' -f $needsCheck
+            }
+            if ($unchanged -gt 0) {
+                $parts += '{0}件は変更なし' -f $unchanged
+            }
+            $statusLabel.Text = '自動調整: ' + ($parts -join ' / ')
+            if ($needsCheck + $unchanged -gt 0) {
+                $statusLabel.Text += '（色付きのセルにマウスで詳細）'
+            }
+        }
+        finally {
+            $form.UseWaitCursor = $false
+            $autoOffsetState.Running = $false
+            foreach ($control in $disabledControls) {
+                $control.Enabled = $true
+            }
+        }
     }
 
     function Get-DraggedTrackInfo {
@@ -2264,6 +2952,10 @@ function Show-MainForm {
     function Set-VideoDropEffect {
         param([System.Windows.Forms.DragEventArgs]$DragEvent)
 
+        if ($autoOffsetState.Running) {
+            $DragEvent.Effect = [System.Windows.Forms.DragDropEffects]::None
+            return
+        }
         if ($DragEvent.Data.GetDataPresent([System.Windows.Forms.DataFormats]::FileDrop)) {
             $DragEvent.Effect = [System.Windows.Forms.DragDropEffects]::Copy
             return
@@ -2279,6 +2971,9 @@ function Show-MainForm {
     function Invoke-VideoDrop {
         param([System.Windows.Forms.DragEventArgs]$DragEvent)
 
+        if ($autoOffsetState.Running) {
+            return
+        }
         try {
             if ($DragEvent.Data.GetDataPresent([System.Windows.Forms.DataFormats]::FileDrop)) {
                 $droppedVideo = Get-FirstMp4FilePath @($DragEvent.Data.GetData([System.Windows.Forms.DataFormats]::FileDrop))
@@ -2427,6 +3122,7 @@ function Show-MainForm {
                 $_.Value = Format-OffsetMs $offsetMs
                 if ($null -ne $offsetRow.Tag) {
                     $offsetRow.Tag.OffsetMs = $offsetMs
+                    Set-OffsetCellNote -Row $offsetRow -Note '' -NoteLevel ''
                 }
                 if ($statusLabel.Text -eq $offsetErrorMessage) {
                     $statusLabel.Text = ''
@@ -2561,6 +3257,10 @@ function Show-MainForm {
                 if ($addedCount -eq 0 -and -not $selectedVideoFromDrop) {
                     Show-ErrorMessage '追加できるファイルがありませんでした。'
                 }
+                if ($addedCount -gt 0) {
+                    Request-AutoOffset -Rows @($grid.Rows | Select-Object -Last $addedCount)
+                }
+                Update-DefaultOutputPath
                 return
             }
 
@@ -2582,6 +3282,35 @@ function Show-MainForm {
     $allOffsetMinusButton.Add_Click({ Step-TrackOffsets -Direction -1 -AllTracks })
     $allOffsetPlusButton.Add_Click({ Step-TrackOffsets -Direction 1 -AllTracks })
     $allOffsetApplyButton.Add_Click({ Invoke-AllTrackOffsetInput })
+    $autoOffsetButton.Add_Click({ Invoke-AutoOffset })
+    $autoOffsetTimer.Add_Tick({
+        if ($autoOffsetState.Running) {
+            return
+        }
+        $autoOffsetTimer.Stop()
+        if ($form.IsDisposed -or -not $form.Visible) {
+            return
+        }
+
+        $pendingAll = $autoOffsetState.PendingAll
+        $pendingRows = @($autoOffsetState.PendingRows.ToArray())
+        $autoOffsetState.PendingAll = $false
+        $autoOffsetState.PendingRows.Clear()
+        if ($pendingAll) {
+            Invoke-AutoOffset -Automatic
+        }
+        elseif ($pendingRows.Count -gt 0) {
+            Invoke-AutoOffset -TargetRows $pendingRows -Automatic
+        }
+    })
+    $form.Add_FormClosing({
+        if ($autoOffsetState.Running) {
+            $_.Cancel = $true
+        }
+    })
+    $form.Add_FormClosed({
+        $autoOffsetTimer.Stop()
+    })
     $allOffsetText.Add_Enter({ $form.AcceptButton = $allOffsetApplyButton })
     $allOffsetText.Add_Leave({ $form.AcceptButton = $okButton })
 
@@ -2624,6 +3353,10 @@ function Show-MainForm {
             if ($addedCount -eq 0) {
                 Show-ErrorMessage '追加できるファイルがありませんでした。'
             }
+            else {
+                Request-AutoOffset -Rows @($grid.Rows | Select-Object -Last $addedCount)
+            }
+            Update-DefaultOutputPath
         }
     })
 
@@ -2655,6 +3388,7 @@ function Show-MainForm {
             $grid.Rows.RemoveAt($rowIndex)
             Update-TrackNumbers -Grid $grid
         }
+        Update-DefaultOutputPath
 
         if ($grid.Rows.Count -gt 0) {
             $newIndex = [Math]::Min($rowIndex, $grid.Rows.Count - 1)
@@ -2690,16 +3424,11 @@ function Show-MainForm {
 
     $settingsButton.Add_Click({
         Complete-TrackNameEdit -Grid $grid -TrackNameColumnIndex $trackNameColumnIndex
-        $oldDefault = $Script:DefaultOutputPath
         $oldSettings = $Script:Settings
         $Script:Settings = Show-SettingsDialog -CurrentSettings $Script:Settings
         Set-TrackNameCandidateColumnItems -Grid $grid -Settings $Script:Settings
         Update-OffsetStepButtons
-        $Script:DefaultOutputPath = Get-DefaultOutputPath -VideoFile $Script:VideoFile -Settings $Script:Settings
-
-        if ($outputText.Text -eq $oldDefault) {
-            $outputText.Text = $Script:DefaultOutputPath
-        }
+        Update-DefaultOutputPath
 
         if (-not (Test-TrackNameDefaultsChanged -OldSettings $oldSettings -NewSettings $Script:Settings)) {
             return
@@ -2747,15 +3476,32 @@ function Show-MainForm {
                 return
             }
 
-            $statusLabel.Text = 'ffmpeg 実行中...'
+            $unadjustedTracks = @()
+            for ($index = 0; $index -lt $trackItems.Count; $index++) {
+                if ([string]$trackItems[$index].OffsetNoteLevel -eq 'error') {
+                    $unadjustedTracks += '・{0}. {1}（{2}）' -f ($index + 1), $trackItems[$index].Title, [System.IO.Path]::GetFileName([string]$trackItems[$index].SourceFile)
+                }
+            }
+            if ($unadjustedTracks.Count -gt 0) {
+                $answer = [System.Windows.Forms.MessageBox]::Show(
+                    "自動調整でずれを判定できなかったトラックがあります。オフセットが合っていない可能性があります。`r`n`r`n" + ($unadjustedTracks -join "`r`n") + "`r`n`r`nこのまま保存しますか？",
+                    'ffmpegMp4Mix GUI',
+                    [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                    [System.Windows.Forms.MessageBoxIcon]::Warning,
+                    [System.Windows.Forms.MessageBoxDefaultButton]::Button2
+                )
+                if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) {
+                    return
+                }
+            }
+
+            $statusLabel.Text = '保存中...'
             $form.UseWaitCursor = $true
             $form.Refresh()
 
             $ran = Invoke-Ffmpeg -OutputPath $outputPath -TrackItems $trackItems
             if ($ran) {
-                $statusLabel.Text = '完了'
-                Show-InfoMessage "出力が完了しました。`r`n`r`n$outputPath"
-                $form.Close()
+                $statusLabel.Text = '保存しました: {0}（{1}）' -f [System.IO.Path]::GetFileName($outputPath), (Get-Date -Format 'HH:mm:ss')
             }
             else {
                 $statusLabel.Text = ''
@@ -2776,7 +3522,7 @@ function Show-MainForm {
         $videoLabel, $videoText, $videoBrowseButton, $useVideoAudio,
         $selectedOffsetLabel, $selectedOffsetMinusButton, $selectedOffsetPlusButton,
         $allOffsetLabel, $allOffsetMinusButton, $allOffsetPlusButton,
-        $allOffsetText, $allOffsetApplyButton, $grid,
+        $allOffsetText, $allOffsetApplyButton, $autoOffsetButton, $grid,
         $upButton, $downButton, $addTrackButton, $deleteTrackButton, $swapVideoButton,
         $outputLabel, $outputText, $browseButton, $settingsButton,
         $statusLabel, $okButton, $cancelButton
@@ -2793,6 +3539,7 @@ function Show-MainForm {
             $grid.Focus() | Out-Null
             $grid.CurrentCell = $grid.Rows[0].Cells[1]
         }
+        Request-AutoOffset
     })
 
     [void]$form.ShowDialog()
@@ -2800,8 +3547,13 @@ function Show-MainForm {
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-Add-Type -TypeDefinition @"
+Add-Type -TypeDefinition @'
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.Text;
 using System.Windows.Forms;
 
 public class TrackTabEventArgs : EventArgs
@@ -2926,12 +3678,906 @@ public class TrackNameDataGridView : DataGridView
         return base.ProcessDataGridViewKey(e);
     }
 }
-"@ -ReferencedAssemblies @('System.Windows.Forms', 'System.Drawing')
+
+public class AudioOffsetFeatures
+{
+    public float[] Samples;
+    public double[] OnsetLow;
+    public double[] OnsetFull;
+    public double[][] Chroma;
+}
+
+public class AudioOffsetResult
+{
+    public int OffsetMs;
+    public string Level;
+    public double Score;
+    public double SecondScore;
+    public bool FineAligned;
+    public double FineSharpness;
+    public bool DriftWarning;
+    public bool EdgeWarning;
+    public double DriftMs;
+    public double[] SegmentOffsetsMs;
+}
+
+public static class AudioOffsetAnalyzer
+{
+    public const int SampleRate = 8000;
+    const int OnsetFrameSize = 256;
+    const int OnsetHop = 80;
+    const int ChromaFrameSize = 2048;
+    const int ChromaHop = 400;
+    const int ChromaRatio = ChromaHop / OnsetHop;
+    const double FrameMs = 1000.0 * OnsetHop / SampleRate;
+
+    public static double MaxLagSeconds = 180.0;
+    public static double MaxDecodeSeconds = 900.0;
+
+    public static AudioOffsetFeatures Load(string ffmpegPath, string inputPath)
+    {
+        return Extract(Decode(ffmpegPath, inputPath));
+    }
+
+    public static float[] Decode(string ffmpegPath, string inputPath)
+    {
+        ProcessStartInfo info = new ProcessStartInfo();
+        info.FileName = ffmpegPath;
+        info.Arguments = "-v error -nostdin -i \"" + inputPath + "\" -map 0:a:0 -vn -ac 1 -ar " + SampleRate +
+            " -t " + MaxDecodeSeconds.ToString(CultureInfo.InvariantCulture) + " -f f32le -";
+        info.UseShellExecute = false;
+        info.RedirectStandardOutput = true;
+        info.RedirectStandardError = true;
+        info.CreateNoWindow = true;
+
+        StringBuilder errors = new StringBuilder();
+        using (Process process = new Process())
+        {
+            process.StartInfo = info;
+            process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e)
+            {
+                if (e.Data != null)
+                {
+                    lock (errors) { errors.AppendLine(e.Data); }
+                }
+            };
+            process.Start();
+            process.BeginErrorReadLine();
+            MemoryStream buffer = new MemoryStream();
+            process.StandardOutput.BaseStream.CopyTo(buffer);
+            process.WaitForExit();
+
+            if (process.ExitCode != 0)
+            {
+                throw new InvalidOperationException("音声を読み込めませんでした: " + Path.GetFileName(inputPath) + Environment.NewLine + errors.ToString().Trim());
+            }
+
+            byte[] bytes = buffer.ToArray();
+            float[] samples = new float[bytes.Length / 4];
+            Buffer.BlockCopy(bytes, 0, samples, 0, samples.Length * 4);
+            if (samples.Length < SampleRate * 10)
+            {
+                throw new InvalidOperationException("音声が短すぎるため解析できません: " + Path.GetFileName(inputPath));
+            }
+            return samples;
+        }
+    }
+
+    public static AudioOffsetFeatures Extract(float[] samples)
+    {
+        AudioOffsetFeatures features = new AudioOffsetFeatures();
+        features.Samples = samples;
+        ExtractOnsets(samples, out features.OnsetLow, out features.OnsetFull);
+        features.Chroma = ExtractChroma(samples);
+        return features;
+    }
+
+    static void ExtractOnsets(float[] samples, out double[] onsetLow, out double[] onsetFull)
+    {
+        int frames = (samples.Length - OnsetFrameSize) / OnsetHop + 1;
+        double[] window = Hann(OnsetFrameSize);
+        double binHz = (double)SampleRate / OnsetFrameSize;
+        int lowEnd = (int)(250.0 / binHz);
+        int fullEnd = (int)(3800.0 / binHz);
+        double[] re = new double[OnsetFrameSize];
+        double[] im = new double[OnsetFrameSize];
+        double[] previous = new double[fullEnd + 1];
+        double[] low = new double[frames];
+        double[] full = new double[frames];
+
+        for (int t = 0; t < frames; t++)
+        {
+            int offset = t * OnsetHop;
+            for (int i = 0; i < OnsetFrameSize; i++)
+            {
+                re[i] = samples[offset + i] * window[i];
+                im[i] = 0;
+            }
+            Fft(re, im, false);
+
+            double lowSum = 0;
+            double fullSum = 0;
+            for (int k = 1; k <= fullEnd; k++)
+            {
+                double level = Math.Log(1.0 + 100.0 * Math.Sqrt(re[k] * re[k] + im[k] * im[k]));
+                if (t > 0)
+                {
+                    double rise = level - previous[k];
+                    if (rise > 0)
+                    {
+                        fullSum += rise;
+                        if (k <= lowEnd)
+                        {
+                            lowSum += rise;
+                        }
+                    }
+                }
+                previous[k] = level;
+            }
+            low[t] = lowSum;
+            full[t] = fullSum;
+        }
+
+        onsetLow = PrepareOnset(low);
+        onsetFull = PrepareOnset(full);
+    }
+
+    static double[] PrepareOnset(double[] values)
+    {
+        int n = values.Length;
+        int half = 25;
+        double[] prefix = new double[n + 1];
+        for (int i = 0; i < n; i++)
+        {
+            prefix[i + 1] = prefix[i] + values[i];
+        }
+
+        double[] result = new double[n];
+        double mean = 0;
+        for (int i = 0; i < n; i++)
+        {
+            int start = Math.Max(0, i - half);
+            int end = Math.Min(n, i + half + 1);
+            double local = (prefix[end] - prefix[start]) / (end - start);
+            result[i] = Math.Max(0, values[i] - local);
+            mean += result[i];
+        }
+
+        mean /= n;
+        for (int i = 0; i < n; i++)
+        {
+            result[i] -= mean;
+        }
+        return result;
+    }
+
+    static double[][] ExtractChroma(float[] samples)
+    {
+        int frames = (samples.Length - ChromaFrameSize) / ChromaHop + 1;
+        double[] window = Hann(ChromaFrameSize);
+        double binHz = (double)SampleRate / ChromaFrameSize;
+        int maxBin = (int)(2000.0 / binHz);
+        int[] pitchClass = new int[maxBin + 1];
+        for (int k = 0; k <= maxBin; k++)
+        {
+            double frequency = k * binHz;
+            if (frequency < 65.0)
+            {
+                pitchClass[k] = -1;
+                continue;
+            }
+            int note = (int)Math.Round(12.0 * Math.Log(frequency / 440.0, 2.0)) + 69;
+            pitchClass[k] = ((note % 12) + 12) % 12;
+        }
+
+        double[][] chroma = new double[12][];
+        for (int c = 0; c < 12; c++)
+        {
+            chroma[c] = new double[frames];
+        }
+
+        double[] re = new double[ChromaFrameSize];
+        double[] im = new double[ChromaFrameSize];
+        double[] energy = new double[frames];
+        double[] vector = new double[12];
+        for (int t = 0; t < frames; t++)
+        {
+            int offset = t * ChromaHop;
+            for (int i = 0; i < ChromaFrameSize; i++)
+            {
+                re[i] = samples[offset + i] * window[i];
+                im[i] = 0;
+            }
+            Fft(re, im, false);
+
+            Array.Clear(vector, 0, 12);
+            for (int k = 1; k <= maxBin; k++)
+            {
+                if (pitchClass[k] >= 0)
+                {
+                    vector[pitchClass[k]] += re[k] * re[k] + im[k] * im[k];
+                }
+            }
+
+            double norm = 0;
+            for (int c = 0; c < 12; c++)
+            {
+                vector[c] = Math.Sqrt(vector[c]);
+                norm += vector[c] * vector[c];
+            }
+            energy[t] = norm;
+            norm = Math.Sqrt(norm);
+            for (int c = 0; c < 12; c++)
+            {
+                chroma[c][t] = norm > 0 ? vector[c] / norm : 0;
+            }
+        }
+
+        double[] sorted = (double[])energy.Clone();
+        Array.Sort(sorted);
+        double quiet = sorted[sorted.Length / 2] * 0.001;
+        for (int t = 0; t < frames; t++)
+        {
+            if (energy[t] <= quiet)
+            {
+                for (int c = 0; c < 12; c++)
+                {
+                    chroma[c][t] = 0;
+                }
+            }
+        }
+
+        for (int c = 0; c < 12; c++)
+        {
+            double mean = 0;
+            for (int t = 0; t < frames; t++)
+            {
+                mean += chroma[c][t];
+            }
+            mean /= frames;
+            for (int t = 0; t < frames; t++)
+            {
+                chroma[c][t] -= mean;
+            }
+        }
+        return chroma;
+    }
+
+    public static AudioOffsetResult Analyze(AudioOffsetFeatures reference, AudioOffsetFeatures track)
+    {
+        int maxLag = (int)(MaxLagSeconds * 1000.0 / FrameMs);
+        int shorter = Math.Min(reference.OnsetLow.Length, track.OnsetLow.Length);
+        int minOverlap = Math.Max(shorter / 2, Math.Min(shorter, (int)(20000.0 / FrameMs)));
+
+        double[] low = NormalizedCorrelation(new double[][] { reference.OnsetLow }, new double[][] { track.OnsetLow }, maxLag, minOverlap);
+        double[] full = NormalizedCorrelation(new double[][] { reference.OnsetFull }, new double[][] { track.OnsetFull }, maxLag, minOverlap);
+        int chromaMaxLag = maxLag / ChromaRatio + 1;
+        int keyShift;
+        double[] chroma = ChromaCorrelation(reference.Chroma, track.Chroma, chromaMaxLag, minOverlap / ChromaRatio, out keyShift);
+
+        double[] combined = new double[2 * maxLag + 1];
+        for (int i = 0; i < combined.Length; i++)
+        {
+            int lag = i - maxLag;
+            combined[i] = (low[i] + full[i] + Interpolate(chroma, (double)lag / ChromaRatio + chromaMaxLag)) / 3.0;
+        }
+
+        double[] onset = new double[combined.Length];
+        for (int i = 0; i < onset.Length; i++)
+        {
+            onset[i] = low[i] + full[i];
+        }
+
+        int exclusion = (int)(500.0 / FrameMs);
+        int refineRadius = (int)(60.0 / FrameMs);
+        List<int> peaks = TopPeaks(combined, 3, exclusion);
+        AudioOffsetResult result = new AudioOffsetResult();
+        int chosenPeak = peaks[0];
+        double chosenLagMs = 0;
+        double bestSharpness = 0;
+        double secondSharpness = 0;
+        for (int p = 0; p < peaks.Count; p++)
+        {
+            int peak = peaks[p];
+            int refined = ArgMax(onset, Math.Max(0, peak - refineRadius), Math.Min(onset.Length, peak + refineRadius + 1));
+            double coarseLagMs = (refined - maxLag + ParabolicPeak(onset, refined)) * FrameMs;
+            if (p == 0)
+            {
+                chosenLagMs = coarseLagMs;
+            }
+
+            double fineLagMs;
+            double sharpness;
+            bool refinedOk = RefineWithPhat(reference.Samples, track.Samples, coarseLagMs, out fineLagMs, out sharpness);
+            double usable = refinedOk ? sharpness : 0;
+            if (usable > bestSharpness)
+            {
+                secondSharpness = bestSharpness;
+                bestSharpness = usable;
+                if (usable >= 10.0)
+                {
+                    result.FineAligned = true;
+                    chosenPeak = peak;
+                    chosenLagMs = fineLagMs;
+                }
+            }
+            else if (usable > secondSharpness)
+            {
+                secondSharpness = usable;
+            }
+        }
+        result.FineSharpness = bestSharpness;
+
+        double second = double.MinValue;
+        for (int i = 0; i < combined.Length; i++)
+        {
+            if (Math.Abs(i - chosenPeak) > exclusion && combined[i] > second)
+            {
+                second = combined[i];
+            }
+        }
+        result.Score = combined[chosenPeak];
+        result.SecondScore = second;
+
+        double lagMs = chosenLagMs;
+        result.SegmentOffsetsMs = MeasureSegments(reference, track, (int)Math.Round(lagMs / FrameMs), keyShift);
+        double minimum = double.MaxValue;
+        double maximum = double.MinValue;
+        int valid = 0;
+        foreach (double segment in result.SegmentOffsetsMs)
+        {
+            if (double.IsNaN(segment))
+            {
+                continue;
+            }
+            valid++;
+            minimum = Math.Min(minimum, segment);
+            maximum = Math.Max(maximum, segment);
+        }
+        if (valid >= 2)
+        {
+            result.DriftMs = maximum - minimum;
+            result.DriftWarning = result.DriftMs > 80.0;
+        }
+
+        result.OffsetMs = (int)Math.Round(-lagMs);
+        result.EdgeWarning = Math.Abs(chosenPeak - maxLag) >= maxLag - exclusion;
+        double ratio = result.Score / Math.Max(result.SecondScore, 0.01);
+        bool sharpWinner = bestSharpness >= 2.0 * Math.Max(secondSharpness, 5.0);
+        if (result.EdgeWarning)
+        {
+            result.Level = "低";
+        }
+        else if (result.FineAligned && (ratio >= 1.5 || (sharpWinner && ratio >= 1.1)))
+        {
+            result.Level = "高";
+        }
+        else if (result.FineAligned && ratio >= 1.05)
+        {
+            result.Level = "中";
+        }
+        else if (!result.FineAligned && ratio >= 1.15 && result.Score >= 0.2 && valid == 3 && result.DriftMs <= 40.0)
+        {
+            result.Level = "中";
+        }
+        else
+        {
+            result.Level = "低";
+        }
+
+        if (result.DriftMs > 200.0)
+        {
+            result.Level = "低";
+        }
+        else if (result.DriftWarning && result.Level == "高")
+        {
+            result.Level = "中";
+        }
+        return result;
+    }
+
+    static List<int> TopPeaks(double[] values, int count, int separation)
+    {
+        List<int> candidates = new List<int>();
+        for (int i = 0; i < values.Length; i++)
+        {
+            double left = i > 0 ? values[i - 1] : double.MinValue;
+            double right = i < values.Length - 1 ? values[i + 1] : double.MinValue;
+            if (values[i] >= left && values[i] > right)
+            {
+                candidates.Add(i);
+            }
+        }
+        candidates.Sort(delegate(int x, int y) { return values[y].CompareTo(values[x]); });
+
+        List<int> peaks = new List<int>();
+        foreach (int candidate in candidates)
+        {
+            bool separated = true;
+            foreach (int peak in peaks)
+            {
+                if (Math.Abs(peak - candidate) <= separation)
+                {
+                    separated = false;
+                    break;
+                }
+            }
+            if (separated)
+            {
+                peaks.Add(candidate);
+                if (peaks.Count == count)
+                {
+                    break;
+                }
+            }
+        }
+        if (peaks.Count == 0)
+        {
+            peaks.Add(ArgMax(values, 0, values.Length));
+        }
+        return peaks;
+    }
+
+    static double[] MeasureSegments(AudioOffsetFeatures reference, AudioOffsetFeatures track, int lag, int keyShift)
+    {
+        int start = Math.Max(0, -lag);
+        int end = Math.Min(reference.OnsetLow.Length, track.OnsetLow.Length - lag);
+        int segmentLength = (end - start) / 3;
+        double[] offsets = new double[] { double.NaN, double.NaN, double.NaN };
+        if (segmentLength < (int)(15000.0 / FrameMs))
+        {
+            return offsets;
+        }
+
+        int radius = (int)(1000.0 / FrameMs);
+        for (int s = 0; s < 3; s++)
+        {
+            int segmentStart = start + s * segmentLength;
+            int segmentEnd = segmentStart + segmentLength;
+            double bestScore = double.MinValue;
+            int bestLag = lag;
+            double[] scores = new double[2 * radius + 1];
+            for (int d = -radius; d <= radius; d++)
+            {
+                int candidate = lag + d;
+                double score = (LocalCorrelation(reference.OnsetLow, track.OnsetLow, segmentStart, segmentEnd, candidate, 1) +
+                    LocalCorrelation(reference.OnsetFull, track.OnsetFull, segmentStart, segmentEnd, candidate, 1) +
+                    LocalChromaCorrelation(reference.Chroma, track.Chroma, segmentStart, segmentEnd, candidate, keyShift)) / 3.0;
+                scores[d + radius] = score;
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestLag = candidate;
+                }
+            }
+            if (bestScore >= 0.1)
+            {
+                offsets[s] = -(bestLag + ParabolicPeak(scores, bestLag - lag + radius)) * FrameMs;
+            }
+        }
+        return offsets;
+    }
+
+    static double LocalCorrelation(double[] a, double[] b, int start, int end, int lag, int step)
+    {
+        double sxy = 0;
+        double sxx = 0;
+        double syy = 0;
+        for (int t = start; t < end; t += step)
+        {
+            int u = t + lag;
+            if (u < 0 || u >= b.Length || t >= a.Length)
+            {
+                continue;
+            }
+            sxy += a[t] * b[u];
+            sxx += a[t] * a[t];
+            syy += b[u] * b[u];
+        }
+        double denominator = Math.Sqrt(sxx * syy);
+        return denominator > 0 ? sxy / denominator : 0;
+    }
+
+    static double LocalChromaCorrelation(double[][] a, double[][] b, int start, int end, int lag, int rotation)
+    {
+        int chromaStart = start / ChromaRatio;
+        int chromaEnd = end / ChromaRatio;
+        double chromaLag = (double)lag / ChromaRatio;
+        int baseLag = (int)Math.Floor(chromaLag);
+        double fraction = chromaLag - baseLag;
+        double sxy = 0;
+        double sxx = 0;
+        double syy = 0;
+        for (int c = 0; c < 12; c++)
+        {
+            double[] x = a[c];
+            double[] y = b[(c + rotation) % 12];
+            for (int t = chromaStart; t < chromaEnd && t < x.Length; t++)
+            {
+                int u = t + baseLag;
+                if (u < 0 || u + 1 >= y.Length)
+                {
+                    continue;
+                }
+                double value = y[u] * (1 - fraction) + y[u + 1] * fraction;
+                sxy += x[t] * value;
+                sxx += x[t] * x[t];
+                syy += value * value;
+            }
+        }
+        double denominator = Math.Sqrt(sxx * syy);
+        return denominator > 0 ? sxy / denominator : 0;
+    }
+
+    static double[] ChromaCorrelation(double[][] a, double[][] b, int maxLag, int minOverlap, out int keyShift)
+    {
+        int lengthA = a[0].Length;
+        int lengthB = b[0].Length;
+        int size = 1;
+        while (size < lengthA + lengthB)
+        {
+            size <<= 1;
+        }
+
+        double[][] aRe = new double[12][];
+        double[][] aIm = new double[12][];
+        double[][] bRe = new double[12][];
+        double[][] bIm = new double[12][];
+        double[] prefixA = new double[lengthA + 1];
+        double[] prefixB = new double[lengthB + 1];
+        for (int c = 0; c < 12; c++)
+        {
+            aRe[c] = new double[size];
+            aIm[c] = new double[size];
+            bRe[c] = new double[size];
+            bIm[c] = new double[size];
+            Array.Copy(a[c], aRe[c], lengthA);
+            Array.Copy(b[c], bRe[c], lengthB);
+            Fft(aRe[c], aIm[c], false);
+            Fft(bRe[c], bIm[c], false);
+            for (int i = 0; i < lengthA; i++)
+            {
+                prefixA[i + 1] += a[c][i] * a[c][i];
+            }
+            for (int i = 0; i < lengthB; i++)
+            {
+                prefixB[i + 1] += b[c][i] * b[c][i];
+            }
+        }
+        for (int i = 0; i < lengthA; i++)
+        {
+            prefixA[i + 1] += prefixA[i];
+        }
+        for (int i = 0; i < lengthB; i++)
+        {
+            prefixB[i + 1] += prefixB[i];
+        }
+
+        double[] bestScores = new double[2 * maxLag + 1];
+        double bestPeak = double.MinValue;
+        keyShift = 0;
+        double[] re = new double[size];
+        double[] im = new double[size];
+        for (int rotation = 0; rotation < 12; rotation++)
+        {
+            Array.Clear(re, 0, size);
+            Array.Clear(im, 0, size);
+            for (int c = 0; c < 12; c++)
+            {
+                int d = (c + rotation) % 12;
+                double[] xr = aRe[c];
+                double[] xi = aIm[c];
+                double[] yr = bRe[d];
+                double[] yi = bIm[d];
+                for (int k = 0; k < size; k++)
+                {
+                    re[k] += xr[k] * yr[k] + xi[k] * yi[k];
+                    im[k] += xr[k] * yi[k] - xi[k] * yr[k];
+                }
+            }
+            Fft(re, im, true);
+
+            double[] scores = new double[2 * maxLag + 1];
+            double peak = double.MinValue;
+            for (int lag = -maxLag; lag <= maxLag; lag++)
+            {
+                int start = Math.Max(0, -lag);
+                int end = Math.Min(lengthA, lengthB - lag);
+                if (end - start < minOverlap)
+                {
+                    continue;
+                }
+                double denominator = Math.Sqrt((prefixA[end] - prefixA[start]) * (prefixB[end + lag] - prefixB[start + lag]));
+                double score = denominator > 0 ? re[(lag + size) % size] / denominator : 0;
+                scores[lag + maxLag] = score;
+                peak = Math.Max(peak, score);
+            }
+            if (peak > bestPeak)
+            {
+                bestPeak = peak;
+                bestScores = scores;
+                keyShift = rotation;
+            }
+        }
+        return bestScores;
+    }
+
+    static bool RefineWithPhat(float[] a, float[] b, double coarseLagMs, out double lagMs, out double sharpness)
+    {
+        lagMs = coarseLagMs;
+        sharpness = 0;
+        int center = (int)Math.Round(coarseLagMs * SampleRate / 1000.0);
+        int size = 1 << 19;
+        int start = Math.Max(0, -center);
+        int end = Math.Min(a.Length, b.Length - center);
+        if (end - start < SampleRate * 10)
+        {
+            return false;
+        }
+
+        int length = Math.Min(end - start, size / 2);
+        int segmentStart = start + (end - start - length) / 2;
+        double[] aRe = new double[size];
+        double[] aIm = new double[size];
+        double[] bRe = new double[size];
+        double[] bIm = new double[size];
+        for (int i = 0; i < length; i++)
+        {
+            double w = 0.5 - 0.5 * Math.Cos(2 * Math.PI * i / length);
+            aRe[i] = a[segmentStart + i] * w;
+            bRe[i] = b[segmentStart + i + center] * w;
+        }
+        Fft(aRe, aIm, false);
+        Fft(bRe, bIm, false);
+
+        int lowBin = (int)(100.0 * size / SampleRate);
+        int highBin = (int)(3800.0 * size / SampleRate);
+        for (int k = 0; k < size; k++)
+        {
+            int bin = k <= size / 2 ? k : size - k;
+            double re = aRe[k] * bRe[k] + aIm[k] * bIm[k];
+            double im = aRe[k] * bIm[k] - aIm[k] * bRe[k];
+            double magnitude = Math.Sqrt(re * re + im * im);
+            if (bin < lowBin || bin > highBin || magnitude <= 1e-12)
+            {
+                aRe[k] = 0;
+                aIm[k] = 0;
+                continue;
+            }
+            aRe[k] = re / magnitude;
+            aIm[k] = im / magnitude;
+        }
+        Fft(aRe, aIm, true);
+
+        int radius = SampleRate * 25 / 1000;
+        int noiseRadius = SampleRate;
+        double[] window = new double[2 * radius + 1];
+        int bestIndex = 0;
+        for (int d = -radius; d <= radius; d++)
+        {
+            window[d + radius] = aRe[(d + size) % size];
+            if (window[d + radius] > window[bestIndex])
+            {
+                bestIndex = d + radius;
+            }
+        }
+
+        double sumSquares = 0;
+        int count = 0;
+        int peak = bestIndex - radius;
+        for (int d = -noiseRadius; d <= noiseRadius; d++)
+        {
+            if (Math.Abs(d - peak) <= 16)
+            {
+                continue;
+            }
+            double value = aRe[(d + size) % size];
+            sumSquares += value * value;
+            count++;
+        }
+        double noise = Math.Sqrt(sumSquares / Math.Max(count, 1));
+        sharpness = noise > 0 ? window[bestIndex] / noise : 0;
+        if (bestIndex == 0 || bestIndex == window.Length - 1)
+        {
+            return false;
+        }
+
+        lagMs = (center + peak + ParabolicPeak(window, bestIndex)) * 1000.0 / SampleRate;
+        return true;
+    }
+
+    static double[] NormalizedCorrelation(double[][] a, double[][] b, int maxLag, int minOverlap)
+    {
+        int lengthA = a[0].Length;
+        int lengthB = b[0].Length;
+        double[] cross = new double[2 * maxLag + 1];
+        double[] prefixA = new double[lengthA + 1];
+        double[] prefixB = new double[lengthB + 1];
+        int size = 1;
+        while (size < lengthA + lengthB)
+        {
+            size <<= 1;
+        }
+
+        for (int d = 0; d < a.Length; d++)
+        {
+            double[] aRe = new double[size];
+            double[] aIm = new double[size];
+            double[] bRe = new double[size];
+            double[] bIm = new double[size];
+            Array.Copy(a[d], aRe, lengthA);
+            Array.Copy(b[d], bRe, lengthB);
+            Fft(aRe, aIm, false);
+            Fft(bRe, bIm, false);
+            for (int k = 0; k < size; k++)
+            {
+                double re = aRe[k] * bRe[k] + aIm[k] * bIm[k];
+                double im = aRe[k] * bIm[k] - aIm[k] * bRe[k];
+                aRe[k] = re;
+                aIm[k] = im;
+            }
+            Fft(aRe, aIm, true);
+            for (int lag = -maxLag; lag <= maxLag; lag++)
+            {
+                cross[lag + maxLag] += aRe[(lag + size) % size];
+            }
+            for (int i = 0; i < lengthA; i++)
+            {
+                prefixA[i + 1] += a[d][i] * a[d][i];
+            }
+            for (int i = 0; i < lengthB; i++)
+            {
+                prefixB[i + 1] += b[d][i] * b[d][i];
+            }
+        }
+
+        for (int i = 0; i < lengthA; i++)
+        {
+            prefixA[i + 1] += prefixA[i];
+        }
+        for (int i = 0; i < lengthB; i++)
+        {
+            prefixB[i + 1] += prefixB[i];
+        }
+
+        double[] scores = new double[2 * maxLag + 1];
+        for (int lag = -maxLag; lag <= maxLag; lag++)
+        {
+            int start = Math.Max(0, -lag);
+            int end = Math.Min(lengthA, lengthB - lag);
+            if (end - start < minOverlap)
+            {
+                continue;
+            }
+            double energyA = prefixA[end] - prefixA[start];
+            double energyB = prefixB[end + lag] - prefixB[start + lag];
+            double denominator = Math.Sqrt(energyA * energyB);
+            scores[lag + maxLag] = denominator > 0 ? cross[lag + maxLag] / denominator : 0;
+        }
+        return scores;
+    }
+
+    static double Interpolate(double[] values, double position)
+    {
+        if (position <= 0)
+        {
+            return values[0];
+        }
+        if (position >= values.Length - 1)
+        {
+            return values[values.Length - 1];
+        }
+        int index = (int)Math.Floor(position);
+        double fraction = position - index;
+        return values[index] * (1 - fraction) + values[index + 1] * fraction;
+    }
+
+    static int ArgMax(double[] values, int start, int end)
+    {
+        int best = start;
+        for (int i = start + 1; i < end; i++)
+        {
+            if (values[i] > values[best])
+            {
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    static double ParabolicPeak(double[] values, int index)
+    {
+        if (index <= 0 || index >= values.Length - 1)
+        {
+            return 0;
+        }
+        double left = values[index - 1];
+        double center = values[index];
+        double right = values[index + 1];
+        double denominator = left - 2 * center + right;
+        if (denominator >= 0)
+        {
+            return 0;
+        }
+        return Math.Max(-0.5, Math.Min(0.5, 0.5 * (left - right) / denominator));
+    }
+
+    static double[] Hann(int size)
+    {
+        double[] window = new double[size];
+        for (int i = 0; i < size; i++)
+        {
+            window[i] = 0.5 - 0.5 * Math.Cos(2 * Math.PI * i / size);
+        }
+        return window;
+    }
+
+    static void Fft(double[] re, double[] im, bool inverse)
+    {
+        int n = re.Length;
+        for (int i = 1, j = 0; i < n; i++)
+        {
+            int bit = n >> 1;
+            for (; (j & bit) != 0; bit >>= 1)
+            {
+                j ^= bit;
+            }
+            j ^= bit;
+            if (i < j)
+            {
+                double temp = re[i]; re[i] = re[j]; re[j] = temp;
+                temp = im[i]; im[i] = im[j]; im[j] = temp;
+            }
+        }
+
+        for (int length = 2; length <= n; length <<= 1)
+        {
+            double angle = 2 * Math.PI / length * (inverse ? 1 : -1);
+            double stepRe = Math.Cos(angle);
+            double stepIm = Math.Sin(angle);
+            int half = length >> 1;
+            for (int i = 0; i < n; i += length)
+            {
+                double wRe = 1;
+                double wIm = 0;
+                for (int k = 0; k < half; k++)
+                {
+                    int a = i + k;
+                    int b = a + half;
+                    double tRe = re[b] * wRe - im[b] * wIm;
+                    double tIm = re[b] * wIm + im[b] * wRe;
+                    re[b] = re[a] - tRe;
+                    im[b] = im[a] - tIm;
+                    re[a] += tRe;
+                    im[a] += tIm;
+                    double nextRe = wRe * stepRe - wIm * stepIm;
+                    wIm = wRe * stepIm + wIm * stepRe;
+                    wRe = nextRe;
+                }
+            }
+        }
+
+        if (inverse)
+        {
+            for (int i = 0; i < n; i++)
+            {
+                re[i] /= n;
+                im[i] /= n;
+            }
+        }
+    }
+}
+'@ -ReferencedAssemblies @('System.Windows.Forms', 'System.Drawing')
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 $Script:Settings = Read-Settings
 
 if ($ValidateOnly) {
+    exit 0
+}
+
+if ($CliDefaults) {
+    Write-CliDefaults -InputFiles $Files -UseVideoAudio ($UseVideoAudio -eq 1) -OutFile $OutFile
     exit 0
 }
 

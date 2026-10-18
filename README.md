@@ -20,6 +20,7 @@ GUI only:
 - View and edit track names, and choose from candidates
 - Add, delete, and reorder tracks
 - Swap the main video with an `.mp4` file in the audio tracks
+- Auto-adjust each track's offset by comparing it with the video's audio
 
 Features under `GUI only` are available only in the GUI. The CLI uses file order and interactive prompts instead.
 
@@ -113,7 +114,14 @@ Example:
 2. Choose **Right click → Send To → mixtrack_ffmpeg_gui**.
 3. The track list is shown.
 4. Edit track names, order, and output path as needed.
-5. Press **OK** to run `ffmpeg`.
+5. Press **保存** (save) to run `ffmpeg` and create the output file.
+6. Press **閉じる** (close) when you are done.
+
+**保存** does not close the window, so you can adjust offsets or other settings and save again as many times as you like.
+
+- When saving finishes, "保存しました" (saved) is shown at the bottom of the window.
+- Re-saving to a file already saved from the same window skips the overwrite confirmation.
+- Saving may fail while the output file is open in a player. Close it in the player and save again.
 
 When launched from Send To, the received file order is used as the initial track order. In the GUI, you can reorder tracks before running.
 
@@ -154,6 +162,29 @@ If the video field is empty and multiple files are dropped onto the track list, 
 - Delaying follows the **delay method** setting. See [Delay Method](#delay-method) for details.
 - If you enter something other than an integer, the previous value is restored.
 
+### Auto-Adjust Offsets
+
+Press **自動調整** (auto-adjust) to compare each track with the video's audio, find the lag, and fill in the offset. The source video's audio track is skipped.
+
+- It is designed to work with on-vocal and off-vocal versions of the same song, other singers, different keys, live recordings, and different arrangements.
+- Tracks that share the same backing track are matched to within 1 ms; different arrangements and similar cases to within about 10 ms.
+- Each result has a confidence level:
+
+  | Confidence | What happens |
+  |---|---|
+  | 高 (high) | The offset is applied. |
+  | 中 (medium) | The offset is applied and the cell turns yellow. Please check it. |
+  | 低 (low) | Nothing is changed and the cell turns red. |
+
+- Hover over the cell to see the detected lag and confidence.
+- Turn on **自動調整を常に行う** (always auto-adjust) in Settings to run it automatically, without pressing the button:
+  - When the window opens (all tracks)
+  - When tracks are added (only the added tracks)
+  - When the video is changed (all tracks)
+- If any low-confidence (red) track is left when you press **保存** (save), a confirmation dialog is shown. Editing that track's offset by hand or with the **選択トラック** (selected track) ± buttons (`Ctrl + Up` / `Ctrl + Down`) removes it from the check. Shifting all tracks at once does not.
+- Recordings played at a different speed (such as a live take with a different tempo) cannot be aligned with a single offset, so a note says the tempo or length may differ.
+- Lags up to 180 seconds in either direction are searched, and the first 15 minutes of each file are analyzed.
+
 ### Reorder Tracks
 
 - Drag and drop rows to reorder tracks.
@@ -165,7 +196,7 @@ If the video field is empty and multiple files are dropped onto the track list, 
 
 ### Keyboard Workflow
 
-The GUI is arranged so you can proceed with `Tab`, text input, and `Enter` after launch.
+The GUI is arranged so you can get to saving with `Tab`, text input, and `Enter` after launch. Press `Esc` to close the window.
 
 ## CLI Usage
 
@@ -208,13 +239,17 @@ File order matters. Audio tracks are added in the order passed to `mixtrack_ffmp
 
 2. Enter each audio track name.
 
-   Press `Enter` without input to use the default track name.
+   Press `Enter` without input to use the default track name. If GUI settings have been saved, the GUI's default track names for that track count are used.
 
 3. Enter each audio track's offset in milliseconds.
 
-   `+500` delays the track by 0.5 seconds, and `-500` makes it start 0.5 seconds earlier. Press `Enter` without input for no shift.
+   `+500` delays the track by 0.5 seconds, and `-500` makes it start 0.5 seconds earlier. Press `Enter` without input to use the default shown (normally 0).
 
-4. When complete, `source_video_name_mixed.mp4` is created in the same folder as the video.
+   If **自動調整を常に行う** (always auto-adjust) is on in the GUI settings, auto-adjust runs before the track name prompts and its result becomes the default offset. The result and confidence are shown before each prompt.
+
+   For a low-confidence track (one that could not be matched), `Enter` alone does not continue. Enter `y` to continue with 0, or enter a number.
+
+4. When complete, `source_video_name_mixed.mp4` is created in the same folder as the video. The output suffix follows the GUI settings (including per-track-count suffixes).
 
 ## Settings
 
@@ -222,16 +257,32 @@ File order matters. Audio tracks are added in the order passed to `mixtrack_ffmp
 
 Use the GUI **Settings** button to change:
 
-- Default track names by track number
+- Default track names by track number (can differ by track count)
+- Output file suffix (can differ by track count)
 - Track name candidates
 - Default name for later tracks
-- Output file suffix
 - Delay method and re-encoding bitrate
 - Step used by the offset buttons
+- Whether to always auto-adjust
 
 GUI settings are saved to `tools\mixtrack_ffmpeg_gui.settings.json`.
 
 On first launch, the GUI reads `TRACKNAME_1`, `TRACKNAME_2`, `TRACKNAME_3` ..., `TRACKNAME_LATER`, `OUTPUT_SUFFIX`, `DELAY_MODE`, and `REENCODE_BITRATE` from `mixtrack_ffmpeg.bat` as defaults.
+
+### Track Names and Output Suffix by Track Count
+
+Use **トラック数** (track count) at the top of the Settings window to choose what you are editing.
+
+- **共通（下記以外のトラック数）** (common): default track names and output suffix used for any track count without its own settings.
+- **2トラックのとき** (for 2 tracks) and so on: select a track count and check **このトラック数専用の設定にする** (use settings for this track count) to create settings for that count, starting from the common values. Track counts with their own settings are marked "（専用）".
+- Unchecking it deletes those settings and goes back to the common values. While it is unchecked, the values actually used for that track count are shown in gray.
+- Track numbers left out of a track-count setting use the common default names, and an empty output suffix uses the common suffix.
+
+The track count is the number of rows in the track list, including the source video's audio row when it is used.
+
+- When the window opens with files, the track names and output suffix for that track count are used.
+- When tracks are added, only the added tracks get default names for the new track count. Existing track names are not changed.
+- When the track count changes and the output path is still the default, it is updated to use the output suffix for the new track count.
 
 ### Delay Method
 
@@ -245,6 +296,13 @@ Choose how a track is delayed when its offset is positive. Starting a track earl
 Copy-mode delays have been confirmed to play correctly in MPC-BE 1.9.1.
 
 ### CLI Settings
+
+The CLI uses the settings saved from the GUI (`tools\mixtrack_ffmpeg_gui.settings.json`).
+
+- Taken from the GUI settings: default track names (including per-track-count settings), output suffix, delay method, re-encoding bitrate, and whether to always auto-adjust
+- Taken from `mixtrack_ffmpeg.bat`: whether to use the source video's audio (`USE_VIDEO_AUDIO`) and MPC-BE 1.5 compatibility mode (`MPCBE15_COMPAT_MODE`)
+
+If GUI settings have not been saved yet, the `mixtrack_ffmpeg.bat` settings below (track names, suffix, delay method, bitrate) are used. They are also the GUI's defaults on first launch.
 
 Edit `mixtrack_ffmpeg.bat` to change CLI defaults.
 
