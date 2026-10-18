@@ -2,6 +2,7 @@ rem mixonoff <Video track> <OnVocal_audio> <offVocal_Audio>
 @echo off
 rem chcp 932 for Shift-JIS
 chcp 932
+title ‚Ò‚½ƒgƒ‰ƒbƒN (CLI”Å)
 setlocal EnableExtensions DisableDelayedExpansion
 set "SCRIPT_DIR=%~dp0"
 
@@ -74,22 +75,28 @@ set /P "USE_VIDEO_AUDIO=Œ³“®‰æ‚Ì‰¹º‚ğ‚Pƒgƒ‰ƒbƒN–Ú‚Ég—p‚µ‚Ü‚·‚©H y0:g—p‚µ‚È‚
 
 :use_video_audio_done
 if "%USE_VIDEO_AUDIO%"=="" set "USE_VIDEO_AUDIO=0"
-call :load_gui_defaults
-
 set "PUSHD_DONE=0"
 
-pushd "%VIDEODIR%" || goto end
-set "PUSHD_DONE=1"
-set "ffmpeg=%SCRIPT_DIR%tools\ffmpeg.exe"
-if exist "%ffmpeg%" goto ffmpeg_found
-set "ffmpeg=%SCRIPT_DIR%ffmpeg.exe"
-if exist "%ffmpeg%" goto ffmpeg_found
+call :find_ffmpeg
+if not "%ffmpeg%"=="" goto ffmpeg_found
+rem ffmpeg.exe ‚ª‚È‚¯‚ê‚ÎAƒZƒbƒgƒAƒbƒv‚Ìƒ_ƒEƒ“ƒ[ƒh‰æ–Ê‚ğŠJ‚­
+if not exist "%SCRIPT_DIR%tools\setup.ps1" goto ffmpeg_missing
+echo ffmpeg.exe ‚ªŒ©‚Â‚©‚ç‚È‚¢‚½‚ßAƒ_ƒEƒ“ƒ[ƒh‰æ–Ê‚ğŠJ‚«‚Ü‚·B
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "%SCRIPT_DIR%tools\setup.ps1" -FfmpegOnly
+call :find_ffmpeg
+if not "%ffmpeg%"=="" goto ffmpeg_found
+
+:ffmpeg_missing
 echo ffmpeg.exe ‚ªŒ©‚Â‚©‚è‚Ü‚¹‚ñB
 echo "%SCRIPT_DIR%tools\ffmpeg.exe"
 echo "%SCRIPT_DIR%ffmpeg.exe"
 goto end
 
 :ffmpeg_found
+call :load_gui_defaults
+
+pushd "%VIDEODIR%" || goto end
+set "PUSHD_DONE=1"
 set "filename=%VIDEONAME%%OUTPUT_SUFFIX%.mp4"
 
 set /A COUNTER=0
@@ -252,6 +259,15 @@ exit /b
 :get_track_name_default_2
 set "TRACKNAME_DEFAULT=%TRACKNAME_2%"
 if "%TRACKNAME_DEFAULT%"=="" set "TRACKNAME_DEFAULT=ƒIƒtƒ{[ƒJƒ‹"
+exit /b
+
+rem tools\ffmpeg.exeA‚È‚¯‚ê‚Îƒ‹[ƒg‚Ì ffmpeg.exei‚Ç‚¿‚ç‚à‚È‚¯‚ê‚Î‹ój
+:find_ffmpeg
+set "ffmpeg=%SCRIPT_DIR%tools\ffmpeg.exe"
+if exist "%ffmpeg%" exit /b
+set "ffmpeg=%SCRIPT_DIR%ffmpeg.exe"
+if exist "%ffmpeg%" exit /b
+set "ffmpeg="
 exit /b
 
 rem GUI”Å‚Ìİ’èiƒgƒ‰ƒbƒN”‚²‚Æ‚Ì‰Šú’lA©“®’²®‚ÌŒ‹‰Êj‚ğ“Ç‚İ‚Ş

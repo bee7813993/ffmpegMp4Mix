@@ -1,11 +1,12 @@
-# ffmpegMp4Mix
+# ぴたトラック
 
-動画ファイルと複数の音声ファイルを1つのMP4にまとめ、各音声トラックにトラック名を付けるためのWindows向けツールです。
+動画ファイルと複数の音声ファイルを1つのMP4にまとめ、各音声トラックにトラック名を付けるためのWindows向けツールです。（旧名: ffmpegMp4Mix）
 
 `ffmpeg` を使って、MPC-BEなどのメディアプレイヤーで音声トラック名が分かりやすく表示されるMP4を作成します。
 
 ## できること
 
+- ZIPを展開して `setup` を開くだけでインストール（ffmpeg も自動で用意）
 - 右クリックの **送る**、またはファイルのドラッグ＆ドロップで起動
 - 動画ファイルが先頭でなくても、最初に見つかった `.mp4` を動画として使用
 - トラック名の初期値設定
@@ -26,13 +27,15 @@ GUI版のみ:
 
 ## どれを使えばいい？
 
-| したいこと | 使うファイル |
-|---|---|
-| 画面で確認しながら操作したい | `mixtrack_ffmpeg_gui` |
-| 少ない操作で早く済ませたい | `mixtrack_ffmpeg` |
+| したいこと | 送るメニューの名前 | ファイル |
+|---|---|---|
+| 画面で確認しながら操作したい（GUI版） | ぴたトラック | `mixtrack_ffmpeg_gui` |
+| 少ない操作で早く済ませたい（CLI版） | ぴたトラック (CLI版) | `mixtrack_ffmpeg` |
 
-拡張子を表示していない場合、エクスプローラー上では `.bat` や `.vbs` が見えません。
-ファイルを直接ドロップする場合は、ルートにある `mixtrack_ffmpeg_gui` または `mixtrack_ffmpeg` にドロップしてください。
+インストールすると、右クリックの **送る** に「ぴたトラック」と「ぴたトラック (CLI版)」が追加されます。
+
+インストールせずに使う場合や、ファイルを直接ドロップする場合は、ルートにある `mixtrack_ffmpeg_gui` または `mixtrack_ffmpeg` を使います。
+拡張子を表示していない場合、エクスプローラー上では `.bat` が見えません。
 
 ## 画面例
 
@@ -47,24 +50,29 @@ GUI版のみ:
 ## フォルダー構成
 
 通常使うドロップ先はルートに置き、内部ファイルは `tools` フォルダーにまとめています。
+インストールした場合、このフォルダーは `%LOCALAPPDATA%\Programs\PitaTrack` にあります。
 
 ```text
-ffmpegMp4Mix\
+PitaTrack\
+  setup.bat                  セットアップ（インストール・更新）
+  PitaTrack.exe              起動用（インストール時や tools\makesendto の実行時に作成）
   mixtrack_ffmpeg.bat        CLI版のドロップ先
-  mixtrack_ffmpeg_gui.vbs    GUI版のドロップ先
+  mixtrack_ffmpeg_gui.bat    GUI版のドロップ先
   README_ja.md
   README.md
   tools\
-    ffmpeg.exe
-    ffprobe.exe
-    ffplay.exe
+    ffmpeg.exe               セットアップか初回起動時にダウンロード
     mixtrack_ffmpeg_gui.ps1
     mixtrack_ffmpeg_gui.settings.json
+    pitatrack.ico            アイコン
+    setup.ps1
     makesendto.bat
     removesendto.bat
 ```
 
 `ffplay.exe` と `ffprobe.exe` は必須ではありませんが、ffmpeg配布物から一緒に置いておいても問題ありません。
+
+`PitaTrack.exe` は、黒い画面（コンソール）を出さずにGUI版を開くための小さな起動用ファイルです。配布ZIPには入っておらず、インストール時（または `tools\makesendto` の実行時）に、WindowsにあるC#コンパイラーでそのPC上に作ります。ショートカット、送るメニュー、アンインストールはこれを使います。VBScriptは使っていません。
 
 ## 動作環境
 
@@ -74,21 +82,53 @@ ffmpegMp4Mix\
 
 ## インストール
 
-1. GitHub Releases から `ffmpegMp4Mix_XXXXXXXX.zip` をダウンロードします。
-   [GitHub Releases](https://github.com/bee7813993/ffmpegMp4Mix/releases)
+### かんたんインストール（おすすめ）
 
-2. ZIPを任意のフォルダーに展開します。
+1. [GitHub Releases](https://github.com/bee7813993/ffmpegMp4Mix/releases) から `PitaTrack_vX.Y.Z.zip` をダウンロードします。
+2. ダウンロードしたZIPを右クリックし、**すべて展開** を選びます。
+3. 展開したフォルダーの `setup` をダブルクリックします。
+4. **インストール** を押します。
+5. 「インストールが完了しました。」と表示されたら、**閉じる** を押します。
 
-3. Windows用の `ffmpeg` を入手します。
-   [ffmpeg.org](https://ffmpeg.org/download.html)
+これで使えるようになります。
 
-4. 入手した `ffmpeg.exe` を `tools` フォルダーにコピーします。
+- ffmpeg（MP4を作るのに必要なソフト）は自動でダウンロードされます（約110MB）。自分で用意する必要はありません。
+- 管理者権限は不要です。インストール先は `%LOCALAPPDATA%\Programs\PitaTrack` です。
+- 右クリックの **送る**、デスクトップ、スタートメニューに「ぴたトラック」が追加されます。追加するものはインストール画面で選べます。
+- インストールが終わったら、展開したフォルダーとZIPファイルは削除してかまいません。
+- 以前 ffmpegMp4Mix を **送る** に登録して使っていた場合は、そのフォルダーの設定と `ffmpeg.exe` を引き継ぎます。以前の送るメニュー（mixtrack_ffmpeg）を削除するかどうかも、インストール画面で選べます。
 
-5. 右クリックの **送る** から使いたい場合は、`tools\makesendto` を実行します。
+`setup` を開いたときに「発行元を確認できませんでした。このソフトウェアを実行しますか？」と表示された場合は **実行** を、「WindowsによってPCが保護されました」と表示された場合は **詳細情報** → **実行** を押してください。インターネットから入手したファイルを開くときの確認です。
 
-登録後、エクスプローラーでファイルを選択して **右クリック → 送る → mixtrack_ffmpeg_gui** または **mixtrack_ffmpeg** を選べるようになります。
+`setup` を開くと黒い画面が一瞬表示され、すぐにセットアップの画面に切り替わります。
 
-送るメニューから削除したい場合は、`tools\removesendto` を実行します。
+#### 更新する
+
+新しいバージョンのZIPで、同じ手順を行います。画面は「更新します」になり、設定と `ffmpeg.exe` はそのまま引き継がれます。
+
+`mixtrack_ffmpeg.bat` は新しいものに置き換わります。CLI版の設定（`USE_VIDEO_AUDIO` など）を書き換えていた場合は、もう一度設定してください。
+
+#### アンインストールする
+
+Windowsの **設定 → アプリ → インストールされているアプリ**（Windows 10は **設定 → アプリ → アプリと機能**）で「ぴたトラック」を選び、**アンインストール** を押します。
+
+ショートカット、送るメニュー、設定、`ffmpeg.exe` も削除されます。
+
+### インストールせずに使う
+
+ZIPを展開したフォルダーのまま使うこともできます。
+
+1. ZIPを任意のフォルダーに展開します。
+2. 右クリックの **送る** から使いたい場合は、`tools\makesendto` を実行します。
+3. 初めて起動したときに `ffmpeg.exe` が見つからない場合は、ダウンロード画面が表示されます。**ダウンロード** を押すと `tools` フォルダーに置かれます。
+
+`ffmpeg.exe` を自分で用意する場合は、[ffmpeg.org](https://ffmpeg.org/download.html) から入手したものを `tools` フォルダーにコピーします。
+
+`tools\makesendto` を実行すると、エクスプローラーでファイルを選択して **右クリック → 送る → ぴたトラック** または **ぴたトラック (CLI版)** を選べるようになります。このとき、起動用の `PitaTrack.exe` をこのフォルダーに作ります。
+
+`mixtrack_ffmpeg_gui` をダブルクリックしたり、ファイルをドロップしたりして開いた場合は、黒い画面が一瞬表示されてからGUI版が開きます。ファイル名に `&` などの記号が入っていてうまく渡せない場合は、`tools\makesendto` で登録した **送る** から開いてください。
+
+送るメニューから削除したい場合は、`tools\removesendto` を実行します。以前の送るメニュー（mixtrack_ffmpeg_gui、mixtrack_ffmpeg）も削除します。
 
 ## 使い方: GUI版
 
@@ -111,7 +151,7 @@ GUI版では、画面上でトラック名や順番を確認しながら実行�
 ### 送るから起動する
 
 1. 動画ファイルと音声ファイルを選択します。
-2. 右クリック → **送る → mixtrack_ffmpeg_gui** を選びます。
+2. 右クリック → **送る → ぴたトラック** を選びます。Windows 11では、右クリック → **その他のオプションを確認** → **送る** の中にあります。
 3. トラック一覧が表示されます。
 4. 必要に応じてトラック名、順番、出力先を変更します。
 5. **保存** を押すと `ffmpeg` が実行され、出力ファイルが作られます。
@@ -125,9 +165,11 @@ GUI版では、画面上でトラック名や順番を確認しながら実行�
 
 送る起動時は、渡されたファイル順がトラックの初期順になります。GUI版では、実行前に並び替えできます。
 
+デスクトップの「ぴたトラック」に、動画ファイルと音声ファイルをまとめてドラッグ＆ドロップしても起動できます。
+
 ### 単体起動する
 
-`mixtrack_ffmpeg_gui` をダブルクリックすると、ファイル指定なしで起動できます。
+デスクトップやスタートメニューの「ぴたトラック」を開くと、ファイル指定なしで起動できます。インストールせずに使う場合は、`mixtrack_ffmpeg_gui` をダブルクリックします。
 
 - 動画欄の **参照...** から動画ファイルを選択
 - トラック一覧の **+ 追加** から音声ファイルを追加
@@ -207,7 +249,7 @@ CLI版は、GUIを開かずに少ない操作で素早く結合したい場合�
 結合したい動画ファイルと音声ファイルを同じフォルダーに置きます。
 
 ファイルの順番は特に重要です。CLI版では、実行前にトラック順を並び替える画面がありません。
-ファイル名の先頭に番号を付けると、エクスプローラーで並べ替えやすくなり、意図した順番で `mixtrack_ffmpeg` に渡しやすくなります。
+ファイル名の先頭に番号を付けると、エクスプローラーで並べ替えやすくなり、意図した順番でCLI版に渡しやすくなります。
 
 例:
 
@@ -219,13 +261,13 @@ CLI版は、GUIを開かずに少ない操作で素早く結合したい場合�
 
 ### 起動方法
 
-- ファイルを選択して **送る → mixtrack_ffmpeg**
+- ファイルを選択して **送る → ぴたトラック (CLI版)**
 - ファイルを `mixtrack_ffmpeg` にドラッグ＆ドロップ
 
 最初に見つかった `.mp4` が動画ファイルとして扱われます。
 それ以外のファイルは音声トラックとして追加されます。
 
-ファイルの順番が重要です。音声トラックは、`mixtrack_ffmpeg` に渡された順に追加されます。
+ファイルの順番が重要です。音声トラックは、CLI版に渡された順に追加されます。
 
 ### 実行中の入力
 
@@ -265,7 +307,7 @@ GUIの **設定** ボタンから変更できます。
 - オフセットのボタンで増減する幅
 - 自動調整を常に行うかどうか
 
-GUIで保存した設定は `tools\mixtrack_ffmpeg_gui.settings.json` に保存されます。
+GUIで保存した設定は `tools\mixtrack_ffmpeg_gui.settings.json` に保存されます（インストールした場合は `%LOCALAPPDATA%\Programs\PitaTrack\tools\mixtrack_ffmpeg_gui.settings.json`）。
 
 初回起動時は、`mixtrack_ffmpeg.bat` の `TRACKNAME_1`、`TRACKNAME_2`、`TRACKNAME_3` ...、`TRACKNAME_LATER`、`OUTPUT_SUFFIX`、`DELAY_MODE`、`REENCODE_BITRATE` を初期値として読み込みます。
 
@@ -304,7 +346,7 @@ CLI版は、GUI版で保存した設定（`tools\mixtrack_ffmpeg_gui.settings.js
 
 GUI版の設定をまだ保存していない場合は、以下の `mixtrack_ffmpeg.bat` の設定（トラック名・接尾語・遅らせる方法・ビットレート）が使われます。これらは、GUI版を初めて起動したときの初期値にもなります。
 
-CLI版の設定は `mixtrack_ffmpeg.bat` を編集します。
+CLI版の設定は `mixtrack_ffmpeg.bat` を編集します。インストールした場合は `%LOCALAPPDATA%\Programs\PitaTrack\mixtrack_ffmpeg.bat` です。更新すると新しいものに置き換わるため、もう一度設定してください。
 
 #### 元動画の音声を使うか
 
@@ -376,10 +418,20 @@ MPC-BEなどで以下を確認してください。
 
 ## よくあるトラブル
 
+### setup を開くと「セットアップに必要なファイルが見つかりません」と表示される
+
+ZIPファイルの中から直接 `setup` を開いています。ZIPファイルを右クリックして **すべて展開** を選び、展開したフォルダーの `setup` を開いてください。
+
 ### ffmpeg.exe が見つからない
 
-`tools\ffmpeg.exe` が存在するか確認してください。
+GUI版・CLI版とも、`ffmpeg.exe` が見つからないときはダウンロード画面を表示します。**ダウンロード** を押してください。
+
+インターネットにつながらないなどでダウンロードできない場合は、[ffmpeg.org](https://ffmpeg.org/download.html) から入手した `ffmpeg.exe` を `tools` フォルダーにコピーしてください。
 CLI版は `tools\ffmpeg.exe` を優先し、見つからない場合はルートの `ffmpeg.exe` も探します。
+
+### 右クリックに「送る」が見当たらない
+
+Windows 11では、右クリック → **その他のオプションを確認** を選ぶと **送る** が表示されます。
 
 ### .mp4 の動画ファイルが見つからない
 
@@ -388,7 +440,9 @@ CLI版は `tools\ffmpeg.exe` を優先し、見つからない場合はルート
 
 ### 送るメニューが古い場所を指している
 
-フォルダーを移動した場合は、`tools\removesendto` で古いショートカットを削除してから、`tools\makesendto` をもう一度実行してください。
+インストールした場合は、新しいZIPの `setup` をもう一度実行してください。
+
+インストールせずに使っていてフォルダーを移動した場合は、`tools\removesendto` で古いショートカットを削除してから、`tools\makesendto` をもう一度実行してください。
 
 ### CLI版の表示が文字化けする
 
@@ -416,3 +470,20 @@ MPC-BE 1.5で重複表示される場合は、`MPCBE15_COMPAT_MODE=1` を試し�
 ## 補足
 
 これまで `L-SMASH Muxer` などで動画と音声を結合していた方向けに、より手軽にトラック名付きMP4を作れるようにしたツールです。
+
+ぴたトラックは、以前は ffmpegMp4Mix という名前でした。
+
+セットアップやダウンロード画面で取得する ffmpeg は、[gyan.dev](https://www.gyan.dev/ffmpeg/builds/) のWindows用ビルド（essentials、GPL）です。[GitHub上の配布ファイル](https://github.com/GyanD/codexffmpeg/releases)をダウンロードし、SHA256で内容を確認してから `ffmpeg.exe` を取り出します。
+
+## 配布ZIPの作り方（開発者向け）
+
+```bat
+powershell -NoProfile -ExecutionPolicy Bypass -File dev\build_release.ps1
+```
+
+`dist\PitaTrack_vX.Y.Z.zip` が作られます。
+
+- 版は `tools\setup.ps1` の `$Script:AppVersion` から読み取ります。リリース前にここを更新してください。
+- gitで管理しているファイルだけを入れます（`dev` フォルダーと `ffmpeg.exe` は入りません）。新しく追加したファイルは、先に `git add` してください。
+- ダウンロードする ffmpeg の版を変えるときは、`tools\setup.ps1` の `$Script:FfmpegUrl` と `$Script:FfmpegSha256` を一緒に変えます。
+- アイコンは `tools\pitatrack.ico` です。差し替えると、次のインストール（または `tools\makesendto` の実行）から、`PitaTrack.exe`・ショートカット・画面のアイコンに反映されます。
