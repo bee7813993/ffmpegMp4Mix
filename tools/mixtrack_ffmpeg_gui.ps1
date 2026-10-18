@@ -30,7 +30,36 @@ function New-DefaultSettings {
         LaterName           = 'トラック'
         OutputSuffix        = '_mixed'
         TrackNameCandidates = @('オンボーカル', 'オフボーカル', 'トラック')
+        DelayMode           = 'copy'
+        ReencodeBitrate     = '256k'
     }
+}
+
+function ConvertTo-DelayMode {
+    param([object]$Value)
+
+    if (([string]$Value).Trim() -eq 'reencode') {
+        return 'reencode'
+    }
+
+    return 'copy'
+}
+
+function Test-ReencodeBitrateText {
+    param([string]$Value)
+
+    return ([string]$Value).Trim() -match '^\d+(\.\d+)?[kKmM]?$'
+}
+
+function ConvertTo-ReencodeBitrate {
+    param([object]$Value)
+
+    $text = ([string]$Value).Trim()
+    if (Test-ReencodeBitrateText $text) {
+        return $text
+    }
+
+    return '256k'
 }
 
 function Get-SupportFilePath {
@@ -56,6 +85,8 @@ function Read-BatchDefaultSettings {
     $map = Get-TrackNameMap $settings
     $laterName = [string]$settings.LaterName
     $suffix = [string]$settings.OutputSuffix
+    $delayMode = [string]$settings.DelayMode
+    $reencodeBitrate = [string]$settings.ReencodeBitrate
     $batchPath = Join-Path $Script:RootDir 'mixtrack_ffmpeg.bat'
 
     if (-not (Test-Path -LiteralPath $batchPath)) {
@@ -75,9 +106,17 @@ function Read-BatchDefaultSettings {
             $suffix = $Matches[1]
             continue
         }
+        if ($line -match '^\s*set\s+"?DELAY_MODE=(.*?)"?\s*$') {
+            $delayMode = $Matches[1]
+            continue
+        }
+        if ($line -match '^\s*set\s+"?REENCODE_BITRATE=(.*?)"?\s*$') {
+            $reencodeBitrate = $Matches[1]
+            continue
+        }
     }
 
-    ConvertTo-SavedSettings -TrackNames $map -LaterName $laterName -OutputSuffix $suffix
+    ConvertTo-SavedSettings -TrackNames $map -LaterName $laterName -OutputSuffix $suffix -DelayMode $delayMode -ReencodeBitrate $reencodeBitrate
 }
 
 function Get-TrackNameMap {
@@ -192,7 +231,9 @@ function ConvertTo-SavedSettings {
         [hashtable]$TrackNames,
         [string]$LaterName,
         [string]$OutputSuffix,
-        [string[]]$TrackNameCandidates = $null
+        [string[]]$TrackNameCandidates = $null,
+        [string]$DelayMode = 'copy',
+        [string]$ReencodeBitrate = '256k'
     )
 
     $orderedNames = [ordered]@{}
@@ -218,6 +259,8 @@ function ConvertTo-SavedSettings {
         LaterName           = $LaterName
         OutputSuffix        = $OutputSuffix
         TrackNameCandidates = @($candidates.ToArray())
+        DelayMode           = ConvertTo-DelayMode $DelayMode
+        ReencodeBitrate     = ConvertTo-ReencodeBitrate $ReencodeBitrate
     }
 }
 
@@ -262,9 +305,11 @@ function Read-Settings {
     }
 
     $convertParams = @{
-        TrackNames   = $map
-        LaterName    = $laterName
-        OutputSuffix = $suffix
+        TrackNames      = $map
+        LaterName       = $laterName
+        OutputSuffix    = $suffix
+        DelayMode       = [string]$settings.DelayMode
+        ReencodeBitrate = [string]$settings.ReencodeBitrate
     }
     if ($null -ne $settings.PSObject.Properties['TrackNameCandidates']) {
         $convertParams.TrackNameCandidates = @(Get-TrackNameCandidates -Settings $settings)
@@ -465,18 +510,78 @@ function Get-CommandLine {
     return ($parts -join ' ')
 }
 
+function ConvertTo-OffsetMs {
+    param([object]$Value)
+
+    $text =([string]$Value).Normalize([System.Text.NormalizationForm]::FormKC).Replace([string][char]0x2212, '-').Trim()
+    if ([string]::IsNullOrWhiteSpace($text)) {
+        return 0
+    }
+    if ($text -notmatch '^[+-]?[0-9]+$') {
+        return $null
+    }
+
+    $offsetMs = 0
+    if (-not [int]::TryParse($text, [System.Globalization.NumberStyles]::AllowLeadingSign, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$offsetMs)) {
+        return $null
+    }
+    return $offsetMs
+}
+
+function Format-OffsetMs {
+    param([int]$OffsetMs)
+
+    if ($OffsetMs -gt 0) {
+        return '+' + [string]$OffsetMs
+    }
+
+    return [string]$OffsetMs
+}
+
+function Format-FfmpegDuration {
+    param([int]$OffsetMs)
+
+    return ([string][Math]::Abs([long]$OffsetMs)) + 'ms'
+}
+
 function New-TrackItem {
     param(
         [string]$SourceFile,
         [bool]$IsVideoAudio,
-        [string]$Title
+        [string]$Title,
+        [int]$OffsetMs = 0
     )
 
     [PSCustomObject]@{
         SourceFile   = $SourceFile
         IsVideoAudio = $IsVideoAudio
         Title        = $Title
+        OffsetMs     = $OffsetMs
         InputIndex   = $null
+    }
+}
+
+function Copy-TrackOffsets {
+    param(
+        [object[]]$Items,
+        [object[]]$SourceItems
+    )
+
+    $remaining = New-Object System.Collections.ArrayList
+    foreach ($sourceItem in @($SourceItems)) {
+        [void]$remaining.Add($sourceItem)
+    }
+
+    foreach ($item in @($Items)) {
+        for ($index = 0; $index -lt $remaining.Count; $index++) {
+            $sourceItem = $remaining[$index]
+            if ([bool]$sourceItem.IsVideoAudio -eq [bool]$item.IsVideoAudio -and
+                ([string]$sourceItem.SourceFile).Equals([string]$item.SourceFile, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $item.OffsetMs = [int]$sourceItem.OffsetMs
+                $remaining.RemoveAt($index)
+                break
+            }
+        }
     }
 }
 
@@ -623,6 +728,15 @@ function Set-CheckBoxTheme {
     $CheckBox.Font = New-UiFont 9
     $CheckBox.BackColor = Get-UiColor 'Background'
     $CheckBox.ForeColor = Get-UiColor 'Text'
+}
+
+function Set-ComboBoxTheme {
+    param([System.Windows.Forms.ComboBox]$ComboBox)
+
+    $ComboBox.Font = New-UiFont 9
+    $ComboBox.BackColor = Get-UiColor 'Surface'
+    $ComboBox.ForeColor = Get-UiColor 'Text'
+    $ComboBox.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
 }
 
 function Set-GridTheme {
@@ -841,7 +955,7 @@ function Add-TrackRow {
     )
 
     Add-TrackNameCandidateToGrid -Grid $Grid -Name ([string]$Item.Title)
-    $rowIndex = $Grid.Rows.Add('', $Item.Title, (Get-TrackSourceText $Item))
+    $rowIndex = $Grid.Rows.Add('', $Item.Title, (Format-OffsetMs ([int]$Item.OffsetMs)), (Get-TrackSourceText $Item))
     $Grid.Rows[$rowIndex].Tag = $Item
 }
 
@@ -861,10 +975,16 @@ function Get-TrackItemsFromGrid {
             continue
         }
 
+        $offsetMs = ConvertTo-OffsetMs $row.Cells[2].Value
+        if ($null -eq $offsetMs) {
+            $offsetMs = [int]$tag.OffsetMs
+        }
+
         $items += New-TrackItem `
             -SourceFile ([string]$tag.SourceFile) `
             -IsVideoAudio ([bool]$tag.IsVideoAudio) `
-            -Title ([string]$row.Cells[1].Value)
+            -Title ([string]$row.Cells[1].Value) `
+            -OffsetMs $offsetMs
     }
     return $items
 }
@@ -1118,18 +1238,33 @@ function Get-GridDropIndex {
 function Build-FfmpegArguments {
     param(
         [object[]]$TrackItems,
-        [string]$OutputPath
+        [string]$OutputPath,
+        [object]$Settings
     )
+
+    $delayMode = ConvertTo-DelayMode $Settings.DelayMode
+    $reencodeBitrate = ConvertTo-ReencodeBitrate $Settings.ReencodeBitrate
 
     $arguments = @('-i', $Script:VideoFile)
     $nextInputIndex = 1
 
     foreach ($item in $TrackItems) {
-        if (-not $item.IsVideoAudio) {
-            $arguments += @('-i', $item.SourceFile)
-            $item.InputIndex = $nextInputIndex
-            $nextInputIndex++
+        $offsetMs = [int]$item.OffsetMs
+        if ($item.IsVideoAudio -and $offsetMs -eq 0) {
+            $item.InputIndex = 0
+            continue
         }
+
+        if ($offsetMs -lt 0) {
+            $arguments += @('-ss', (Format-FfmpegDuration $offsetMs))
+        }
+        elseif ($offsetMs -gt 0 -and $delayMode -eq 'copy') {
+            $arguments += @('-itsoffset', (Format-FfmpegDuration $offsetMs))
+        }
+
+        $arguments += @('-i', $item.SourceFile)
+        $item.InputIndex = $nextInputIndex
+        $nextInputIndex++
     }
 
     $arguments += @('-c:v', 'copy', '-c:a', 'copy', '-map', '0:v')
@@ -1137,7 +1272,7 @@ function Build-FfmpegArguments {
     for ($index = 0; $index -lt $TrackItems.Count; $index++) {
         $item = $TrackItems[$index]
         $mapValue = if ($item.IsVideoAudio) {
-            '0:a:0'
+            ([string]$item.InputIndex) + ':a:0'
         }
         else {
             ([string]$item.InputIndex) + ':a'
@@ -1149,6 +1284,14 @@ function Build-FfmpegArguments {
             ('-metadata:s:a:' + $index), ('title=' + $title),
             ('-metadata:s:a:' + $index), ('handler_name=' + $title)
         )
+
+        if ([int]$item.OffsetMs -gt 0 -and $delayMode -eq 'reencode') {
+            $arguments += @(
+                ('-c:a:' + $index), 'aac',
+                ('-b:a:' + $index), $reencodeBitrate,
+                ('-filter:a:' + $index), ('adelay=' + [string][int]$item.OffsetMs + ':all=1')
+            )
+        }
     }
 
     $arguments += $OutputPath
@@ -1175,7 +1318,7 @@ function Invoke-Ffmpeg {
         throw '出力ファイルに入力動画と同じファイルは指定できません。'
     }
 
-    $arguments = @(Build-FfmpegArguments -TrackItems $TrackItems -OutputPath $OutputPath)
+    $arguments = @(Build-FfmpegArguments -TrackItems $TrackItems -OutputPath $OutputPath -Settings $Script:Settings)
     if (Test-Path -LiteralPath $OutputPath) {
         $answer = [System.Windows.Forms.MessageBox]::Show(
             "出力ファイルはすでに存在します。上書きしますか？`r`n`r`n$OutputPath",
@@ -1221,8 +1364,8 @@ function Show-SettingsDialog {
     $dialog = New-Object System.Windows.Forms.Form
     $dialog.Text = '設定'
     $dialog.StartPosition = 'CenterParent'
-    $dialog.Size = New-Object System.Drawing.Size(560, 580)
-    $dialog.MinimumSize = New-Object System.Drawing.Size(520, 500)
+    $dialog.Size = New-Object System.Drawing.Size(560, 640)
+    $dialog.MinimumSize = New-Object System.Drawing.Size(520, 560)
     Set-FormTheme -Form $dialog
 
     $grid = New-Object System.Windows.Forms.DataGridView
@@ -1316,20 +1459,54 @@ function Show-SettingsDialog {
     $suffixText.TabIndex = 5
     Set-TextBoxTheme -TextBox $suffixText
 
+    $delayModeLabel = New-Object System.Windows.Forms.Label
+    $delayModeLabel.Text = '遅らせる方法'
+    $delayModeLabel.Location = New-Object System.Drawing.Point(12, 438)
+    $delayModeLabel.Size = New-Object System.Drawing.Size(140, 22)
+    $delayModeLabel.Anchor = 'Left,Bottom'
+    Set-LabelTheme -Label $delayModeLabel -Muted
+
+    $delayModeCombo = New-Object System.Windows.Forms.ComboBox
+    $delayModeCombo.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+    [void]$delayModeCombo.Items.Add('コピー（再エンコードなし）')
+    [void]$delayModeCombo.Items.Add('再エンコード（AAC）')
+    $delayModeCombo.SelectedIndex = if ((ConvertTo-DelayMode $CurrentSettings.DelayMode) -eq 'reencode') { 1 } else { 0 }
+    $delayModeCombo.Location = New-Object System.Drawing.Point(158, 435)
+    $delayModeCombo.Size = New-Object System.Drawing.Size(374, 22)
+    $delayModeCombo.Anchor = 'Left,Right,Bottom'
+    $delayModeCombo.TabIndex = 6
+    Set-ComboBoxTheme -ComboBox $delayModeCombo
+
+    $bitrateLabel = New-Object System.Windows.Forms.Label
+    $bitrateLabel.Text = 'ビットレート'
+    $bitrateLabel.Location = New-Object System.Drawing.Point(12, 470)
+    $bitrateLabel.Size = New-Object System.Drawing.Size(140, 22)
+    $bitrateLabel.Anchor = 'Left,Bottom'
+    Set-LabelTheme -Label $bitrateLabel -Muted
+
+    $bitrateText = New-Object System.Windows.Forms.TextBox
+    $bitrateText.Text = ConvertTo-ReencodeBitrate $CurrentSettings.ReencodeBitrate
+    $bitrateText.Location = New-Object System.Drawing.Point(158, 467)
+    $bitrateText.Size = New-Object System.Drawing.Size(120, 22)
+    $bitrateText.Anchor = 'Left,Bottom'
+    $bitrateText.TabIndex = 7
+    $bitrateText.Enabled = $delayModeCombo.SelectedIndex -eq 1
+    Set-TextBoxTheme -TextBox $bitrateText
+
     $okButton = New-Object System.Windows.Forms.Button
     $okButton.Text = '保存'
-    $okButton.Location = New-Object System.Drawing.Point(356, 494)
+    $okButton.Location = New-Object System.Drawing.Point(356, 554)
     $okButton.Size = New-Object System.Drawing.Size(84, 30)
     $okButton.Anchor = 'Right,Bottom'
-    $okButton.TabIndex = 6
+    $okButton.TabIndex = 8
     Set-ButtonTheme -Button $okButton -Kind Primary
 
     $cancelButton = New-Object System.Windows.Forms.Button
     $cancelButton.Text = 'キャンセル'
-    $cancelButton.Location = New-Object System.Drawing.Point(448, 494)
+    $cancelButton.Location = New-Object System.Drawing.Point(448, 554)
     $cancelButton.Size = New-Object System.Drawing.Size(84, 30)
     $cancelButton.Anchor = 'Right,Bottom'
-    $cancelButton.TabIndex = 7
+    $cancelButton.TabIndex = 9
     $cancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     Set-ButtonTheme -Button $cancelButton
 
@@ -1353,6 +1530,10 @@ function Show-SettingsDialog {
         if ($null -ne $grid.CurrentCell -and $grid.Rows.Count -gt 0) {
             $grid.Rows.RemoveAt($grid.CurrentCell.RowIndex)
         }
+    })
+
+    $delayModeCombo.Add_SelectedIndexChanged({
+        $bitrateText.Enabled = $delayModeCombo.SelectedIndex -eq 1
     })
 
     $okButton.Add_Click({
@@ -1394,8 +1575,15 @@ function Show-SettingsDialog {
             $suffix = '_mixed'
         }
 
+        $delayMode = if ($delayModeCombo.SelectedIndex -eq 1) { 'reencode' } else { 'copy' }
+        $bitrate = ([string]$bitrateText.Text).Trim()
+        if ($delayMode -eq 'reencode' -and -not (Test-ReencodeBitrateText $bitrate)) {
+            Show-ErrorMessage 'ビットレートは 256k のように入力してください。'
+            return
+        }
+
         $candidates = @(ConvertTo-TrackNameCandidateList -Candidates $candidateText.Lines)
-        $newSettings = ConvertTo-SavedSettings -TrackNames $trackNames -LaterName $later -OutputSuffix $suffix -TrackNameCandidates $candidates
+        $newSettings = ConvertTo-SavedSettings -TrackNames $trackNames -LaterName $later -OutputSuffix $suffix -TrackNameCandidates $candidates -DelayMode $delayMode -ReencodeBitrate $bitrate
         Save-Settings $newSettings
         $dialog.Tag = $newSettings
         $dialog.DialogResult = [System.Windows.Forms.DialogResult]::OK
@@ -1406,7 +1594,8 @@ function Show-SettingsDialog {
     $dialog.CancelButton = $cancelButton
     $dialog.Controls.AddRange(@(
         $grid, $addButton, $deleteButton, $candidateLabel, $candidateText,
-        $laterLabel, $laterText, $suffixLabel, $suffixText, $okButton, $cancelButton
+        $laterLabel, $laterText, $suffixLabel, $suffixText,
+        $delayModeLabel, $delayModeCombo, $bitrateLabel, $bitrateText, $okButton, $cancelButton
     ))
 
     if ($grid.Rows.Count -gt 0) {
@@ -1482,14 +1671,21 @@ function Show-MainForm {
 
     $titleColumn = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
     $titleColumn.HeaderText = 'トラック名'
-    $titleColumn.FillWeight = 28
+    $titleColumn.FillWeight = 26
     $grid.Columns.Add($titleColumn) | Out-Null
     Set-TrackNameCandidateColumnItems -Grid $grid -Settings $Script:Settings
+
+    $offsetColumn = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
+    $offsetColumn.HeaderText = 'オフセット(ms)'
+    $offsetColumn.ToolTipText = '音声の開始タイミングをミリ秒でずらします。+ で遅らせる、- で早める'
+    $offsetColumn.FillWeight = 16
+    $offsetColumn.DefaultCellStyle.Alignment = [System.Windows.Forms.DataGridViewContentAlignment]::MiddleRight
+    $grid.Columns.Add($offsetColumn) | Out-Null
 
     $sourceColumn = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
     $sourceColumn.HeaderText = '入力ファイル'
     $sourceColumn.ReadOnly = $true
-    $sourceColumn.FillWeight = 60
+    $sourceColumn.FillWeight = 46
     $grid.Columns.Add($sourceColumn) | Out-Null
 
     $upButton = New-Object System.Windows.Forms.Button
@@ -1582,12 +1778,16 @@ function Show-MainForm {
     $suppressVideoAudioReset = $false
     $trackDragFormat = 'ffmpegMp4Mix.TrackRowIndex'
     $trackNameColumnIndex = 1
+    $offsetColumnIndex = 2
+    $sourceColumnIndex = 3
+    $offsetErrorMessage = 'オフセットは整数（ミリ秒）で入力してください。元の値に戻しました。'
     $trackDragState = [PSCustomObject]@{
         RowIndex = -1
         Box = [System.Drawing.Rectangle]::Empty
     }
 
     function Reset-GridFromInputs {
+        $previousItems = @(Get-TrackItemsFromGrid -Grid $grid)
         $items = @()
         $trackNumber = 1
         if ($useVideoAudio.Checked -and (Test-VideoSelected)) {
@@ -1599,6 +1799,7 @@ function Show-MainForm {
             $items += New-TrackItem -SourceFile $audioFile -IsVideoAudio $false -Title (Get-DefaultTrackName -Settings $Script:Settings -TrackIndex $trackNumber)
             $trackNumber++
         }
+        Copy-TrackOffsets -Items $items -SourceItems $previousItems
         Set-TrackItemsToGrid -Grid $grid -Items $items
     }
 
@@ -1648,7 +1849,7 @@ function Show-MainForm {
 
             if ([bool]$row.Tag.IsVideoAudio) {
                 $row.Tag.SourceFile = $Script:VideoFile
-                $row.Cells[2].Value = Get-TrackSourceText $row.Tag
+                $row.Cells[$sourceColumnIndex].Value = Get-TrackSourceText $row.Tag
                 $updated = $true
             }
         }
@@ -1829,7 +2030,7 @@ function Show-MainForm {
         }
         else {
             $tag.SourceFile = $oldVideo
-            $row.Cells[2].Value = Get-TrackSourceText $tag
+            $row.Cells[$sourceColumnIndex].Value = Get-TrackSourceText $tag
         }
 
         Set-MainVideoFile -VideoFile $newVideo
@@ -1963,7 +2164,19 @@ function Show-MainForm {
     })
 
     $grid.Add_EditingControlShowing({
-        if ($null -eq $grid.CurrentCell -or $grid.CurrentCell.ColumnIndex -ne $trackNameColumnIndex) {
+        if ($null -eq $grid.CurrentCell) {
+            return
+        }
+
+        if ($grid.CurrentCell.ColumnIndex -eq $offsetColumnIndex) {
+            $offsetTextBox = $_.Control -as [System.Windows.Forms.TextBox]
+            if ($null -ne $offsetTextBox) {
+                $offsetTextBox.AutoCompleteMode = [System.Windows.Forms.AutoCompleteMode]::None
+            }
+            return
+        }
+
+        if ($grid.CurrentCell.ColumnIndex -ne $trackNameColumnIndex) {
             return
         }
 
@@ -1984,6 +2197,26 @@ function Show-MainForm {
     })
 
     $grid.Add_CellParsing({
+        if ($_.ColumnIndex -eq $offsetColumnIndex) {
+            $offsetRow = $grid.Rows[$_.RowIndex]
+            $offsetMs = ConvertTo-OffsetMs $_.Value
+            if ($null -eq $offsetMs) {
+                $_.Value = $offsetRow.Cells[$offsetColumnIndex].Value
+                $statusLabel.Text = $offsetErrorMessage
+            }
+            else {
+                $_.Value = Format-OffsetMs $offsetMs
+                if ($null -ne $offsetRow.Tag) {
+                    $offsetRow.Tag.OffsetMs = $offsetMs
+                }
+                if ($statusLabel.Text -eq $offsetErrorMessage) {
+                    $statusLabel.Text = ''
+                }
+            }
+            $_.ParsingApplied = $true
+            return
+        }
+
         if ($_.ColumnIndex -ne $trackNameColumnIndex) {
             return
         }
@@ -2023,7 +2256,12 @@ function Show-MainForm {
         }
 
         $trackDragState.RowIndex = $hit.RowIndex
-        [void](Set-TrackNameCell -Grid $grid -RowIndex $hit.RowIndex -TrackNameColumnIndex $trackNameColumnIndex)
+        if ($hit.ColumnIndex -eq $offsetColumnIndex) {
+            $grid.CurrentCell = $grid.Rows[$hit.RowIndex].Cells[$offsetColumnIndex]
+        }
+        else {
+            [void](Set-TrackNameCell -Grid $grid -RowIndex $hit.RowIndex -TrackNameColumnIndex $trackNameColumnIndex)
+        }
 
         $dragSize = [System.Windows.Forms.SystemInformation]::DragSize
         $trackDragState.Box = New-Object System.Drawing.Rectangle -ArgumentList `

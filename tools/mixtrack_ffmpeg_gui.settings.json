@@ -12,5 +12,7 @@
                                 "ライブオンボーカル",
                                 "CDオンボーカル",
                                 "ボーカルカット"
-                            ]
+                            ],
+    "DelayMode":  "copy",
+    "ReencodeBitrate":  "256k"
 }

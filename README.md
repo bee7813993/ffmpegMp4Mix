@@ -10,6 +10,7 @@ It uses `ffmpeg` to create MP4 files whose audio track names are easier to ident
 - Uses the first `.mp4` file found as the video, even when it is not first in the received order
 - Configure default track names
 - Optionally use the source video's audio as the first track
+- Shift each audio track earlier or later (in milliseconds)
 - Configure the output file suffix
 - CLI batch workflow is also available
 
@@ -133,6 +134,14 @@ If the video field is empty and multiple files are dropped onto the track list, 
 - With the keyboard, press `Alt + Up`, `Alt + Down`, or `F4` on a track name cell to open candidates.
 - Names not in the candidate list can still be typed directly.
 
+### Shift Audio Timing
+
+- Enter the shift in milliseconds in the **Offset (ms)** column (`オフセット(ms)` in the GUI).
+- `+500` delays the track by 0.5 seconds, and `-500` makes it start 0.5 seconds earlier. `0` or an empty cell means no shift.
+- Starting earlier trims the beginning of the audio (no re-encoding).
+- Delaying follows the **delay method** setting. See [Delay Method](#delay-method) for details.
+- If you enter something other than an integer, the previous value is restored.
+
 ### Reorder Tracks
 
 - Drag and drop rows to reorder tracks.
@@ -186,7 +195,11 @@ File order matters. Audio tracks are added in the order passed to `mixtrack_ffmp
 
    Press `Enter` without input to use the default track name.
 
-3. When complete, `source_video_name_mixed.mp4` is created in the same folder as the video.
+3. Enter each audio track's offset in milliseconds.
+
+   `+500` delays the track by 0.5 seconds, and `-500` makes it start 0.5 seconds earlier. Press `Enter` without input for no shift.
+
+4. When complete, `source_video_name_mixed.mp4` is created in the same folder as the video.
 
 ## Settings
 
@@ -198,10 +211,22 @@ Use the GUI **Settings** button to change:
 - Track name candidates
 - Default name for later tracks
 - Output file suffix
+- Delay method and re-encoding bitrate
 
 GUI settings are saved to `tools\mixtrack_ffmpeg_gui.settings.json`.
 
-On first launch, the GUI reads `TRACKNAME_1`, `TRACKNAME_2`, `TRACKNAME_3` ..., `TRACKNAME_LATER`, and `OUTPUT_SUFFIX` from `mixtrack_ffmpeg.bat` as defaults.
+On first launch, the GUI reads `TRACKNAME_1`, `TRACKNAME_2`, `TRACKNAME_3` ..., `TRACKNAME_LATER`, `OUTPUT_SUFFIX`, `DELAY_MODE`, and `REENCODE_BITRATE` from `mixtrack_ffmpeg.bat` as defaults.
+
+### Delay Method
+
+Choose how a track is delayed when its offset is positive. Starting a track earlier never re-encodes, whichever method you choose.
+
+| Method | GUI label | CLI value | Notes |
+|---|---|---|---|
+| Copy (default) | コピー（再エンコードなし） | `copy` | No quality loss and fast. The start position is stored in the MP4 edit list, so players that ignore edit lists play the track without the delay. |
+| Re-encode | 再エンコード（AAC） | `reencode` | Only delayed tracks are re-encoded to AAC with silence added at the start. The delay works in every player, with a slight quality loss. |
+
+Copy-mode delays have been confirmed to play correctly in MPC-BE 1.9.1.
 
 ### CLI Settings
 
@@ -257,6 +282,16 @@ set MPCBE15_COMPAT_MODE=1
 
 In compatibility mode, track names may not be displayed in MPC-BE 1.4 or some other players.
 
+#### Delay Method and Bitrate
+
+```bat
+set "DELAY_MODE=copy"
+set "REENCODE_BITRATE=256k"
+```
+
+- `DELAY_MODE`: `copy` delays without re-encoding; `reencode` re-encodes delayed tracks to AAC. See [Delay Method](#delay-method) for the difference.
+- `REENCODE_BITRATE`: Bitrate used when `DELAY_MODE=reencode`.
+
 ## Verifying the Output
 
 Check the following in MPC-BE or another player:
@@ -291,10 +326,16 @@ Text may look garbled in PowerShell or some terminal apps, but it is intended to
 Display behavior depends on the player.
 If names are duplicated in MPC-BE 1.5, try `MPCBE15_COMPAT_MODE=1`.
 
+### A Delayed Track Plays Without the Delay
+
+The player probably ignores MP4 edit lists.
+Switch the delay method to re-encode (GUI: **Settings**, CLI: `DELAY_MODE=reencode`).
+
 ## Notes
 
 - The output format is MP4.
 - Video and audio streams are normally copied without re-encoding.
+- When the delay method is set to re-encode, only the delayed tracks are re-encoded to AAC.
 - File names containing characters that are awkward on Windows, such as `*`, `?`, `"`, `<`, or `>`, may not work correctly.
 - File names containing parentheses `()` or spaces are supported.
 

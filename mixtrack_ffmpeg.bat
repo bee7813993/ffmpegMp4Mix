@@ -20,6 +20,13 @@ set USE_VIDEO_AUDIO=
 rem フラグ：MPC-BE 1.5 互換モード
 set MPCBE15_COMPAT_MODE=0
 
+rem 音声を遅らせる方法：copy=再エンコードなし、reencode=AACで再エンコード
+rem 早める場合は常に再エンコードなしです。
+set "DELAY_MODE=copy"
+
+rem 再エンコード時のビットレート
+set "REENCODE_BITRATE=256k"
+
 rem 入力ファイル一覧から最初の mp4 を動画として使用
 set "VIDEOFILE="
 set "VIDEODIR="
@@ -105,15 +112,25 @@ set "TRACKFILE=%VIDEOFILE%"
 echo ===== ファイル名："%TRACKFILE%" =====
 set /A TRACK_INDEX=COUNTER+1
 call :read_track_name
+call :read_track_offset
 
+rem 開始タイミングをずらす場合は、動画ファイルを音声用の入力として追加
+set "VIDEO_AUDIO_MAP=0:a:0"
+if "%OFFSET_INPUT_OPTION%"=="" goto add_video_audio_map
+set CMDOPTION1=%CMDOPTION1%%OFFSET_INPUT_OPTION% -i "%TRACKFILE%"
+set "VIDEO_AUDIO_MAP=%ACOUNTER%:a:0"
+set /A ACOUNTER+=1
+
+:add_video_audio_map
 if "%MPCBE15_COMPAT_MODE%"=="1" goto add_video_audio_compat
-set CMDOPTION2=%CMDOPTION2% -map 0:a:0 -metadata:s:a:%COUNTER% title="%TRACKNAME%" -metadata:s:a:%COUNTER% handler_name="%TRACKNAME%"
+set CMDOPTION2=%CMDOPTION2% -map %VIDEO_AUDIO_MAP% -metadata:s:a:%COUNTER% title="%TRACKNAME%" -metadata:s:a:%COUNTER% handler_name="%TRACKNAME%"
 goto add_video_audio_done
 
 :add_video_audio_compat
-set CMDOPTION2=%CMDOPTION2% -map 0:a:0 -metadata:s:a:%COUNTER% title="%TRACKNAME%" -metadata:s:a:%COUNTER% handler_name="%TRACK_INDEX%"
+set CMDOPTION2=%CMDOPTION2% -map %VIDEO_AUDIO_MAP% -metadata:s:a:%COUNTER% title="%TRACKNAME%" -metadata:s:a:%COUNTER% handler_name="%TRACK_INDEX%"
 
 :add_video_audio_done
+set CMDOPTION2=%CMDOPTION2%%OFFSET_OUTPUT_OPTION%
 set /A COUNTER+=1
 exit /b
 
@@ -121,7 +138,8 @@ exit /b
 echo ===== ファイル名："%TRACKFILE%" =====
 set /A TRACK_INDEX=COUNTER+1
 call :read_track_name
-set CMDOPTION1=%CMDOPTION1% -i "%TRACKFILE%"
+call :read_track_offset
+set CMDOPTION1=%CMDOPTION1%%OFFSET_INPUT_OPTION% -i "%TRACKFILE%"
 
 if "%MPCBE15_COMPAT_MODE%"=="1" goto add_audio_track_compat
 set CMDOPTION2=%CMDOPTION2% -map %ACOUNTER%:a -metadata:s:a:%COUNTER% title="%TRACKNAME%" -metadata:s:a:%COUNTER% handler_name="%TRACKNAME%"
@@ -131,6 +149,7 @@ goto add_audio_track_done
 set CMDOPTION2=%CMDOPTION2% -map %ACOUNTER%:a -metadata:s:a:%COUNTER% title="%TRACKNAME%" -metadata:s:a:%COUNTER% handler_name="%TRACK_INDEX%"
 
 :add_audio_track_done
+set CMDOPTION2=%CMDOPTION2%%OFFSET_OUTPUT_OPTION%
 set /A ACOUNTER+=1
 set /A COUNTER+=1
 exit /b
@@ -144,6 +163,43 @@ set /P "TRACKNAME_WORK= トラック名を入力 略 %TRACKNAME_DEFAULT%："
 if "%TRACKNAME_WORK%"=="" set "TRACKNAME_WORK=%TRACKNAME_DEFAULT%"
 set "TRACKNAME=%TRACKNAME_WORK%"
 exit /b
+
+:read_track_offset
+set "OFFSET_INPUT_OPTION="
+set "OFFSET_OUTPUT_OPTION="
+set "TRACKOFFSET="
+set /P "TRACKOFFSET= オフセット(ms)を入力 [+:遅らせる -:早める] 略 0："
+if "%TRACKOFFSET%"=="" exit /b
+echo(%TRACKOFFSET%| findstr /R /X /C:"[0-9][0-9]*" /C:"+[0-9][0-9]*" /C:"-[0-9][0-9]*" >nul
+if errorlevel 1 goto read_track_offset_invalid
+
+set "TRACKOFFSET_SIGN=+"
+set "TRACKOFFSET_DIGITS=%TRACKOFFSET%"
+if "%TRACKOFFSET:~0,1%"=="+" set "TRACKOFFSET_DIGITS=%TRACKOFFSET:~1%"
+if "%TRACKOFFSET:~0,1%"=="-" set "TRACKOFFSET_SIGN=-"
+if "%TRACKOFFSET:~0,1%"=="-" set "TRACKOFFSET_DIGITS=%TRACKOFFSET:~1%"
+
+rem 先頭の0を除く（すべて0なら空になる）
+set "TRACKOFFSET_MS="
+for /f "tokens=* delims=0" %%A in ("%TRACKOFFSET_DIGITS%") do set "TRACKOFFSET_MS=%%A"
+if "%TRACKOFFSET_MS%"=="" exit /b
+
+if "%TRACKOFFSET_SIGN%"=="-" goto read_track_offset_advance
+if /I "%DELAY_MODE%"=="reencode" goto read_track_offset_reencode
+set "OFFSET_INPUT_OPTION= -itsoffset %TRACKOFFSET_MS%ms"
+exit /b
+
+:read_track_offset_advance
+set "OFFSET_INPUT_OPTION= -ss %TRACKOFFSET_MS%ms"
+exit /b
+
+:read_track_offset_reencode
+set "OFFSET_OUTPUT_OPTION= -c:a:%COUNTER% aac -b:a:%COUNTER% %REENCODE_BITRATE% -filter:a:%COUNTER% adelay=%TRACKOFFSET_MS%:all=1"
+exit /b
+
+:read_track_offset_invalid
+echo  オフセットは整数（ミリ秒）で入力してください。
+goto read_track_offset
 
 :get_track_name_default
 set "TRACKNAME_DEFAULT="
