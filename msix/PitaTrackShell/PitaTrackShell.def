@@ -1,0 +1,4 @@
+LIBRARY PitaTrackShell
+EXPORTS
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow PRIVATE

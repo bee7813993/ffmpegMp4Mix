@@ -5,7 +5,7 @@ param(
 
 # 配布用ZIP（dist\PitaTrack_v<版>.zip）を作ります。
 # 版は tools\setup.ps1 の $Script:AppVersion から読み取ります。
-# git で管理しているファイルだけを入れ、dev フォルダーと .git* は除きます（ffmpeg.exe は入りません）。
+# git で管理しているファイルだけを入れ、dev フォルダー、Store 版用の msix フォルダー、.git* は除きます（ffmpeg.exe は入りません）。
 
 $ErrorActionPreference = 'Stop'
 
@@ -20,7 +20,7 @@ if ($setupText -notmatch '\$Script:AppVersion\s*=\s*''([^'']+)''') {
 }
 $version = $Matches[1]
 
-$files = @(git -C $repoRoot -c core.quotepath=off ls-files) | Where-Object { $_ -notmatch '^(dev/|\.git)' }
+$files = @(git -C $repoRoot -c core.quotepath=off ls-files) | Where-Object { $_ -notmatch '^(dev/|msix/|\.git)' }
 if ($LASTEXITCODE -ne 0 -or $files.Count -eq 0) {
     throw 'git ls-files でファイル一覧を取得できませんでした。'
 }

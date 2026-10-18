@@ -277,97 +277,8 @@ function Register-Uninstall {
 
 # コンソールを出さずに PowerShell の画面を開く小さな exe。VBScript を使わずに済むよう、
 # このPCの C# コンパイラーで作る（ダウンロードしたファイルではないので、開くときの警告も出ない）。
-#   引数なし・ファイル指定: GUI（tools\mixtrack_ffmpeg_gui.ps1）を開く
-#   /uninstall           : アンインストール（tools\setup.ps1 -Uninstall）
-$Script:LauncherSource = @'
-using System;
-using System.Diagnostics;
-using System.IO;
-using System.Runtime.InteropServices;
-using System.Text;
-using System.Windows.Forms;
-
-static class PitaTrackLauncher
-{
-    [DllImport("user32.dll")]
-    static extern bool AllowSetForegroundWindow(int processId);
-
-    [STAThread]
-    static int Main(string[] args)
-    {
-        string tools = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tools");
-        string script = Path.Combine(tools, "mixtrack_ffmpeg_gui.ps1");
-        string options = "";
-        int first = 0;
-        if (args.Length > 0 && string.Equals(args[0], "/uninstall", StringComparison.OrdinalIgnoreCase))
-        {
-            script = Path.Combine(tools, "setup.ps1");
-            options = " -Uninstall";
-            first = 1;
-        }
-
-        if (!File.Exists(script))
-        {
-            ShowError("ぴたトラックに必要なファイルが見つかりません。\r\n\r\n" + script);
-            return 1;
-        }
-
-        StringBuilder line = new StringBuilder("-NoProfile -STA -ExecutionPolicy Bypass -File ");
-        line.Append(Quote(script)).Append(options);
-        for (int i = first; i < args.Length; i++)
-        {
-            line.Append(' ').Append(Quote(args[i]));
-        }
-
-        ProcessStartInfo info = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, @"WindowsPowerShell\v1.0\powershell.exe"), line.ToString());
-        info.UseShellExecute = false;
-        info.CreateNoWindow = true;
-        // 開いた画面が前面に出るようにする
-        AllowSetForegroundWindow(-1);
-        try
-        {
-            Process.Start(info);
-        }
-        catch (Exception ex)
-        {
-            ShowError("ぴたトラックを開けませんでした。\r\n\r\n" + ex.Message);
-            return 1;
-        }
-        return 0;
-    }
-
-    static void ShowError(string message)
-    {
-        MessageBox.Show(message, "ぴたトラック", MessageBoxButtons.OK, MessageBoxIcon.Error);
-    }
-
-    // CommandLineToArgvW の規則で引数を囲む
-    static string Quote(string value)
-    {
-        if (value.Length > 0 && value.IndexOfAny(new char[] { ' ', '\t', '"' }) < 0)
-        {
-            return value;
-        }
-
-        StringBuilder result = new StringBuilder("\"");
-        int backslashes = 0;
-        foreach (char c in value)
-        {
-            if (c == '\\')
-            {
-                backslashes++;
-                continue;
-            }
-            result.Append('\\', c == '"' ? backslashes * 2 + 1 : backslashes);
-            result.Append(c);
-            backslashes = 0;
-        }
-        result.Append('\\', backslashes * 2);
-        result.Append('"');
-        return result.ToString();
-    }
-}
-'@
+# ソースは tools\PitaTrackLauncher.cs（Store 版の dev\build_msix.ps1 と共通）。
+$Script:LauncherSourceName = 'PitaTrackLauncher.cs'
 
 function Get-PowerShellPath {
     return Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
@@ -375,6 +286,12 @@ function Get-PowerShellPath {
 
 function Build-Launcher {
     param([string]$Root)
+
+    $sourcePath = Join-Path $Script:ScriptDir $Script:LauncherSourceName
+    if (-not (Test-Path -LiteralPath $sourcePath)) {
+        throw ('起動用の ' + $Script:LauncherName + ' のソース（' + $Script:LauncherSourceName + '）が見つかりません。')
+    }
+    $source = [System.IO.File]::ReadAllText($sourcePath, [System.Text.Encoding]::UTF8)
 
     $target = Join-Path $Root $Script:LauncherName
     $tempPath = Join-Path ([System.IO.Path]::GetTempPath()) ('PitaTrack_' + [guid]::NewGuid().ToString('N') + '.exe')
@@ -391,7 +308,7 @@ function Build-Launcher {
 
     $provider = New-Object Microsoft.CSharp.CSharpCodeProvider
     try {
-        $results = $provider.CompileAssemblyFromSource($parameters, $Script:LauncherSource)
+        $results = $provider.CompileAssemblyFromSource($parameters, $source)
     }
     finally {
         $provider.Dispose()

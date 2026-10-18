@@ -22,6 +22,19 @@ if (-not (Test-Path -LiteralPath (Join-Path $Script:RootDir 'mixtrack_ffmpeg.bat
 $Script:ToolDir = Join-Path $Script:RootDir 'tools'
 $Script:AppDir = $Script:RootDir
 $Script:ConfigPath = Join-Path $Script:ScriptDir 'mixtrack_ffmpeg_gui.settings.json'
+# 設定がまだ保存されていないときに読む設定（先にあるものを使う）
+$Script:ConfigFallbackPaths = @()
+# Store 版（MSIX）はインストール先に書き込めないため、起動用の PitaTrack.exe が PITATRACK_PACKAGED=1 を渡す。
+# 設定は %LOCALAPPDATA%\PitaTrack に保存する（実体は Windows がパッケージ専用の場所に振り替え、アンインストールで消える）。
+# まだ保存していなければ、ZIP 版でインストールしたときの設定、なければ同梱の初期設定を読む。
+if ($env:PITATRACK_PACKAGED -eq '1') {
+    $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
+    $Script:ConfigFallbackPaths = @(
+        (Join-Path $localAppData 'Programs\PitaTrack\tools\mixtrack_ffmpeg_gui.settings.json'),
+        $Script:ConfigPath
+    )
+    $Script:ConfigPath = Join-Path $localAppData 'PitaTrack\mixtrack_ffmpeg_gui.settings.json'
+}
 $Script:Settings = $null
 $Script:VideoFile = $null
 $Script:AudioFiles = @()
@@ -415,12 +428,24 @@ function ConvertTo-SavedSettings {
     }
 }
 
+# 読み込む設定ファイル（保存したもの、なければ ConfigFallbackPaths の順。どれもなければ $null）
+function Get-SettingsReadPath {
+    foreach ($path in @($Script:ConfigPath) + $Script:ConfigFallbackPaths) {
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            return $path
+        }
+    }
+
+    return $null
+}
+
 function Read-Settings {
     $settings = Read-BatchDefaultSettings
 
-    if (Test-Path -LiteralPath $Script:ConfigPath) {
+    $configPath = Get-SettingsReadPath
+    if ($null -ne $configPath) {
         try {
-            $json = Get-Content -LiteralPath $Script:ConfigPath -Raw -Encoding UTF8
+            $json = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
             $loaded = $json | ConvertFrom-Json
             if ($null -ne $loaded) {
                 $settings = $loaded
@@ -481,6 +506,10 @@ function Save-Settings {
     param([object]$Settings)
 
     $json = $Settings | ConvertTo-Json -Depth 8
+    $configDirectory = Split-Path -Parent $Script:ConfigPath
+    if (-not (Test-Path -LiteralPath $configDirectory)) {
+        New-Item -ItemType Directory -Path $configDirectory -Force | Out-Null
+    }
     Set-Content -LiteralPath $Script:ConfigPath -Value $json -Encoding UTF8
 }
 
