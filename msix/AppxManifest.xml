@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ぴたトラック Store 版（MSIX）のマニフェストのひな形。dev\build_msix.ps1 が __ で囲んだ値を埋めてパッケージに入れる。
+  Identity の Name と Publisher、PublisherDisplayName は、Store に出すときは Partner Center の「製品 ID」の値にする。
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+  xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
+  xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap5 com desktop4 rescap">
+
+  <Identity Name="__IDENTITY_NAME__" Publisher="__PUBLISHER__" Version="__VERSION__" ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>ぴたトラック</DisplayName>
+    <PublisherDisplayName>__PUBLISHER_DISPLAY_NAME__</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="ja-JP" />
+  </Resources>
+
+  <Applications>
+    <Application Id="PitaTrack" Executable="PitaTrack.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="ぴたトラック"
+        Description="動画と音声ファイルを、トラック名付きの1つの MP4 にまとめます"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
+      <Extensions>
+        <!-- コマンドラインから pitatrack で開ける -->
+        <uap5:Extension Category="windows.appExecutionAlias">
+          <uap5:AppExecutionAlias>
+            <uap5:ExecutionAlias Alias="pitatrack.exe" />
+          </uap5:AppExecutionAlias>
+        </uap5:Extension>
+        <!-- 右クリックメニューの本体（msix\PitaTrackShell。dllhost.exe に読み込まれる） -->
+        <com:Extension Category="windows.comServer">
+          <com:ComServer>
+            <com:SurrogateServer AppId="2E35BB1F-E182-4EE1-8984-8AAEA58697F8" DisplayName="ぴたトラック 右クリックメニュー">
+              <com:Class Id="B77F4B20-9C3F-452F-BB9A-3541E9779F23" Path="PitaTrackShell.dll" ThreadingModel="STA" />
+              <com:Class Id="84F0A3D3-3D4C-48B3-A617-A7E9D4B974E1" Path="PitaTrackShell.dll" ThreadingModel="STA" />
+            </com:SurrogateServer>
+          </com:ComServer>
+        </com:Extension>
+        <!-- すべてのファイルに登録し、動画・音声のファイルがないときは DLL 側で項目を隠す。
+             試作では Id の名前順に並んだように見えたので、GUI 版（PitaTrack）が先に来るようにしている -->
+        <desktop4:Extension Category="windows.fileExplorerContextMenus">
+          <desktop4:FileExplorerContextMenus>
+            <desktop4:ItemType Type="*">
+              <desktop4:Verb Id="PitaTrackCli" Clsid="84F0A3D3-3D4C-48B3-A617-A7E9D4B974E1" />
+              <desktop4:Verb Id="PitaTrack" Clsid="B77F4B20-9C3F-452F-BB9A-3541E9779F23" />
+            </desktop4:ItemType>
+          </desktop4:FileExplorerContextMenus>
+        </desktop4:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>
