@@ -2,6 +2,7 @@
 param(
     [switch]$ValidateOnly,
     [switch]$CliDefaults,
+    [switch]$Detach,
     [int]$UseVideoAudio = 0,
     [string]$OutFile,
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -108,6 +109,22 @@ function Get-SupportFilePath {
     }
 
     return Join-Path $Script:ToolDir $FileName
+}
+
+# ffmpeg.exe がなければ、セットアップのダウンロード画面を開いてから探し直す
+function Request-Ffmpeg {
+    $ffmpegPath = Get-SupportFilePath -FileName 'ffmpeg.exe'
+    if (Test-Path -LiteralPath $ffmpegPath -PathType Leaf) {
+        return $ffmpegPath
+    }
+
+    $setupScript = Join-Path $Script:ScriptDir 'setup.ps1'
+    if (Test-Path -LiteralPath $setupScript -PathType Leaf) {
+        $arguments = @('-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', (ConvertTo-CommandLineArgument $setupScript), '-FfmpegOnly')
+        Start-Process -FilePath 'powershell.exe' -ArgumentList $arguments -WindowStyle Hidden -Wait
+    }
+
+    return Get-SupportFilePath -FileName 'ffmpeg.exe'
 }
 
 function Read-BatchDefaultSettings {
@@ -416,7 +433,7 @@ function Read-Settings {
             else {
                 [System.Windows.Forms.MessageBox]::Show(
                     "設定ファイルを読み込めませんでした。初期設定で起動します。`r`n`r`n$($_.Exception.Message)",
-                    'ffmpegMp4Mix GUI',
+                    'ぴたトラック',
                     [System.Windows.Forms.MessageBoxButtons]::OK,
                     [System.Windows.Forms.MessageBoxIcon]::Warning
                 ) | Out-Null
@@ -920,7 +937,7 @@ function Show-ErrorMessage {
 
     [System.Windows.Forms.MessageBox]::Show(
         $Message,
-        'ffmpegMp4Mix GUI',
+        'ぴたトラック',
         [System.Windows.Forms.MessageBoxButtons]::OK,
         [System.Windows.Forms.MessageBoxIcon]::Error
     ) | Out-Null
@@ -1632,7 +1649,7 @@ function Invoke-Ffmpeg {
         [object[]]$TrackItems
     )
 
-    $ffmpegPath = Get-SupportFilePath -FileName 'ffmpeg.exe'
+    $ffmpegPath = Request-Ffmpeg
     if (-not (Test-Path -LiteralPath $ffmpegPath)) {
         throw "ffmpeg.exe が見つかりません。`r`n$ffmpegPath"
     }
@@ -1654,7 +1671,7 @@ function Invoke-Ffmpeg {
     elseif (Test-Path -LiteralPath $OutputPath) {
         $answer = [System.Windows.Forms.MessageBox]::Show(
             "出力ファイルはすでに存在します。上書きしますか？`r`n`r`n$OutputPath",
-            'ffmpegMp4Mix GUI',
+            'ぴたトラック',
             [System.Windows.Forms.MessageBoxButtons]::YesNo,
             [System.Windows.Forms.MessageBoxIcon]::Question
         )
@@ -2195,11 +2212,15 @@ function Show-SettingsDialog {
 
 function Show-MainForm {
     $form = New-Object System.Windows.Forms.Form
-    $form.Text = 'ffmpegMp4Mix GUI'
+    $form.Text = 'ぴたトラック'
     $form.StartPosition = 'CenterScreen'
     $form.Size = New-Object System.Drawing.Size(880, 580)
     $form.MinimumSize = New-Object System.Drawing.Size(760, 480)
     Set-FormTheme -Form $form
+    $iconPath = Join-Path $Script:ToolDir 'pitatrack.ico'
+    if (Test-Path -LiteralPath $iconPath) {
+        $form.Icon = New-Object System.Drawing.Icon -ArgumentList $iconPath
+    }
 
     $videoLabel = New-Object System.Windows.Forms.Label
     $videoLabel.Text = '動画'
@@ -2766,7 +2787,7 @@ function Show-MainForm {
             return
         }
 
-        $ffmpegPath = Get-SupportFilePath -FileName 'ffmpeg.exe'
+        $ffmpegPath = if ($Automatic) { Get-SupportFilePath -FileName 'ffmpeg.exe' } else { Request-Ffmpeg }
         if (-not (Test-Path -LiteralPath $ffmpegPath)) {
             if ($Automatic) {
                 $statusLabel.Text = '自動調整: ffmpeg.exe が見つからないため調整できませんでした。'
@@ -3436,7 +3457,7 @@ function Show-MainForm {
 
         $answer = [System.Windows.Forms.MessageBox]::Show(
             '現在のトラック名を新しい初期値で更新しますか？',
-            'ffmpegMp4Mix GUI',
+            'ぴたトラック',
             [System.Windows.Forms.MessageBoxButtons]::YesNo,
             [System.Windows.Forms.MessageBoxIcon]::Question
         )
@@ -3485,7 +3506,7 @@ function Show-MainForm {
             if ($unadjustedTracks.Count -gt 0) {
                 $answer = [System.Windows.Forms.MessageBox]::Show(
                     "自動調整でずれを判定できなかったトラックがあります。オフセットが合っていない可能性があります。`r`n`r`n" + ($unadjustedTracks -join "`r`n") + "`r`n`r`nこのまま保存しますか？",
-                    'ffmpegMp4Mix GUI',
+                    'ぴたトラック',
                     [System.Windows.Forms.MessageBoxButtons]::YesNo,
                     [System.Windows.Forms.MessageBoxIcon]::Warning,
                     [System.Windows.Forms.MessageBoxDefaultButton]::Button2
@@ -3543,6 +3564,16 @@ function Show-MainForm {
     })
 
     [void]$form.ShowDialog()
+}
+
+# mixtrack_ffmpeg_gui.bat から開いたときは、見えないウインドウで開き直す（コンソールを残さない）
+if ($Detach) {
+    $arguments = @('-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', (ConvertTo-CommandLineArgument $PSCommandPath))
+    foreach ($file in $Files) {
+        $arguments += ConvertTo-CommandLineArgument $file
+    }
+    Start-Process -FilePath 'powershell.exe' -ArgumentList $arguments -WindowStyle Hidden
+    exit 0
 }
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -4582,4 +4613,5 @@ if ($CliDefaults) {
 }
 
 Initialize-InputFiles -InputFiles $Files -Settings $Script:Settings
+Request-Ffmpeg | Out-Null
 Show-MainForm

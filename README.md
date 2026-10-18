@@ -1,11 +1,12 @@
-# ffmpegMp4Mix
+# PitaTrack (ぴたトラック)
 
-ffmpegMp4Mix is a Windows tool for combining one video file and multiple audio files into a single MP4 while assigning names to each audio track.
+PitaTrack is a Windows tool for combining one video file and multiple audio files into a single MP4 while assigning names to each audio track. It was formerly called ffmpegMp4Mix.
 
 It uses `ffmpeg` to create MP4 files whose audio track names are easier to identify in players such as MPC-BE.
 
 ## Features
 
+- Install by extracting the ZIP and opening `setup` (ffmpeg is downloaded for you)
 - Launch from Windows **Send To** or by dragging files onto the entry files
 - Uses the first `.mp4` file found as the video, even when it is not first in the received order
 - Configure default track names
@@ -26,13 +27,15 @@ Features under `GUI only` are available only in the GUI. The CLI uses file order
 
 ## Which file should I use?
 
-| Purpose | File |
-|---|---|
-| Check and adjust tracks in a window | `mixtrack_ffmpeg_gui` |
-| Finish quickly with fewer steps | `mixtrack_ffmpeg` |
+| Purpose | Send To name | File |
+|---|---|---|
+| Check and adjust tracks in a window (GUI) | ぴたトラック | `mixtrack_ffmpeg_gui` |
+| Finish quickly with fewer steps (CLI) | ぴたトラック (CLI版) | `mixtrack_ffmpeg` |
 
-If file extensions are hidden in Explorer, `.bat` and `.vbs` are not shown.
-When dragging files directly, drop them onto `mixtrack_ffmpeg_gui` or `mixtrack_ffmpeg` in the root folder.
+After installation, **Send To** has the entries "ぴたトラック" (GUI) and "ぴたトラック (CLI版)" (CLI).
+
+When using the tool without installing it, or when dragging files directly, use `mixtrack_ffmpeg_gui` or `mixtrack_ffmpeg` in the root folder.
+If file extensions are hidden in Explorer, `.bat` is not shown.
 
 ## Screenshots
 
@@ -47,22 +50,27 @@ When dragging files directly, drop them onto `mixtrack_ffmpeg_gui` or `mixtrack_
 ## Folder Layout
 
 The root folder contains the drag-and-drop entry files. Internal files are kept in `tools`.
+When installed, this folder is `%LOCALAPPDATA%\Programs\PitaTrack`.
 
 ```text
-ffmpegMp4Mix\
+PitaTrack\
+  setup.bat                  Setup (install and update)
+  PitaTrack.exe              Launcher (created by setup or tools\makesendto)
   mixtrack_ffmpeg.bat        CLI entry file
-  mixtrack_ffmpeg_gui.vbs    GUI entry file
+  mixtrack_ffmpeg_gui.bat    GUI entry file
   README_ja.md
   README.md
   tools\
-    ffmpeg.exe
-    ffprobe.exe
-    ffplay.exe
+    ffmpeg.exe               Downloaded by setup or on first launch
     mixtrack_ffmpeg_gui.ps1
     mixtrack_ffmpeg_gui.settings.json
+    pitatrack.ico            Icon
+    setup.ps1
     makesendto.bat
     removesendto.bat
 ```
+
+`PitaTrack.exe` is a small launcher that opens the GUI without a console window. It is not in the release ZIP: setup (or `tools\makesendto`) builds it on your PC with the C# compiler that comes with Windows. The shortcuts, Send To entries, and uninstaller use it. VBScript is not used.
 
 `ffplay.exe` and `ffprobe.exe` are not required, but it is fine to keep them with `ffmpeg.exe`.
 
@@ -74,21 +82,55 @@ ffmpegMp4Mix\
 
 ## Installation
 
-1. Download `ffmpegMp4Mix_XXXXXXXX.zip` from GitHub Releases.
-   [GitHub Releases](https://github.com/bee7813993/ffmpegMp4Mix/releases)
+### Easy Installation (Recommended)
 
-2. Extract the ZIP file to any folder.
+1. Download `PitaTrack_vX.Y.Z.zip` from [GitHub Releases](https://github.com/bee7813993/ffmpegMp4Mix/releases).
+2. Right-click the downloaded ZIP and choose **Extract All**.
+3. Double-click `setup` in the extracted folder.
+4. Press **インストール** (install).
+5. When "インストールが完了しました。" (installation complete) is shown, press **閉じる** (close).
 
-3. Download `ffmpeg` for Windows.
-   [ffmpeg.org](https://ffmpeg.org/download.html)
+That's all.
 
-4. Copy `ffmpeg.exe` into the `tools` folder.
+- `ffmpeg`, which is needed to create MP4 files, is downloaded automatically (about 110 MB). You do not need to get it yourself.
+- No administrator rights are needed. The tool is installed to `%LOCALAPPDATA%\Programs\PitaTrack`.
+- "ぴたトラック" is added to **Send To**, the desktop, and the Start menu. You can choose which ones in the setup window.
+- After installation, you can delete the extracted folder and the ZIP file.
+- If you used ffmpegMp4Mix from **Send To**, its settings and `ffmpeg.exe` are carried over. The setup window also lets you remove the old Send To entries (mixtrack_ffmpeg).
 
-5. To use Windows **Send To**, run `tools\makesendto`.
+If Windows shows "The publisher could not be verified. Are you sure you want to run this software?" when you open `setup`, press **Run**. If it shows "Windows protected your PC", press **More info** → **Run anyway**. Windows asks this for files downloaded from the internet.
 
-After registration, select files in Explorer and choose **Right click → Send To → mixtrack_ffmpeg_gui** or **mixtrack_ffmpeg**.
+When you open `setup`, a console window flashes briefly before the setup window appears.
 
-To remove the Send To shortcuts, run `tools\removesendto`.
+On PCs where Windows 11 **Smart App Control** is on, PitaTrack may be blocked and not run. If nothing happens when you open `setup`, or Windows says Smart App Control blocked it, see [Nothing Happens When Opening setup (Smart App Control)](#nothing-happens-when-opening-setup-smart-app-control).
+
+#### Updating
+
+Follow the same steps with the ZIP of the new version. The window says it will update, and your settings and `ffmpeg.exe` are kept.
+
+`mixtrack_ffmpeg.bat` is replaced with the new one. If you edited the CLI settings in it (such as `USE_VIDEO_AUDIO`), set them again.
+
+#### Uninstalling
+
+In Windows **Settings → Apps → Installed apps** (Windows 10: **Settings → Apps → Apps & features**), select "ぴたトラック" and choose **Uninstall**.
+
+The shortcuts, Send To entries, settings, and `ffmpeg.exe` are also removed.
+
+### Using Without Installing
+
+You can also use the tool from the extracted folder.
+
+1. Extract the ZIP file to any folder.
+2. To use Windows **Send To**, run `tools\makesendto`.
+3. If `ffmpeg.exe` is not found on first launch, a download window is shown. Press **ダウンロード** (download) to place it in the `tools` folder.
+
+To provide `ffmpeg.exe` yourself, download it from [ffmpeg.org](https://ffmpeg.org/download.html) and copy it into the `tools` folder.
+
+After running `tools\makesendto`, select files in Explorer and choose **Right click → Send To → ぴたトラック** or **ぴたトラック (CLI版)**. It also builds the `PitaTrack.exe` launcher in that folder.
+
+When you double-click `mixtrack_ffmpeg_gui` or drop files onto it, a console window flashes briefly before the GUI opens. If a file name containing symbols such as `&` is not passed correctly, open the GUI from the **Send To** entry registered by `tools\makesendto` instead.
+
+To remove the Send To shortcuts, run `tools\removesendto`. It also removes the old Send To entries (mixtrack_ffmpeg_gui and mixtrack_ffmpeg).
 
 ## GUI Usage
 
@@ -111,7 +153,7 @@ Example:
 ### Launch from Send To
 
 1. Select the video and audio files.
-2. Choose **Right click → Send To → mixtrack_ffmpeg_gui**.
+2. Choose **Right click → Send To → ぴたトラック**. In Windows 11, **Send To** is under **Right click → Show more options**.
 3. The track list is shown.
 4. Edit track names, order, and output path as needed.
 5. Press **保存** (save) to run `ffmpeg` and create the output file.
@@ -125,9 +167,11 @@ Example:
 
 When launched from Send To, the received file order is used as the initial track order. In the GUI, you can reorder tracks before running.
 
+You can also drag and drop the video and audio files together onto "ぴたトラック" on the desktop.
+
 ### Launch by itself
 
-Double-click `mixtrack_ffmpeg_gui` to open the GUI without input files.
+Open "ぴたトラック" from the desktop or the Start menu to open the GUI without input files. When using the tool without installing it, double-click `mixtrack_ffmpeg_gui`.
 
 - Use **Browse...** in the video field to select the video file.
 - Use **+ Add** to add audio files.
@@ -207,7 +251,7 @@ The CLI is useful when you want to finish quickly with fewer operations and do n
 Place the video file and audio files you want to combine in the same folder.
 
 File order is especially important in the CLI because there is no screen for reordering tracks before execution.
-Adding numbers to the beginning of file names makes them easier to sort in Explorer and easier to pass to `mixtrack_ffmpeg` in the intended order.
+Adding numbers to the beginning of file names makes them easier to sort in Explorer and easier to pass to the CLI in the intended order.
 
 Example:
 
@@ -219,13 +263,13 @@ Example:
 
 ### Launch
 
-- Select files and choose **Send To → mixtrack_ffmpeg**
+- Select files and choose **Send To → ぴたトラック (CLI版)**
 - Drag and drop files onto `mixtrack_ffmpeg`
 
 The first `.mp4` file found is used as the video.
 All other files are added as audio tracks.
 
-File order matters. Audio tracks are added in the order passed to `mixtrack_ffmpeg`.
+File order matters. Audio tracks are added in the order passed to the CLI.
 
 ### Prompts
 
@@ -265,7 +309,7 @@ Use the GUI **Settings** button to change:
 - Step used by the offset buttons
 - Whether to always auto-adjust
 
-GUI settings are saved to `tools\mixtrack_ffmpeg_gui.settings.json`.
+GUI settings are saved to `tools\mixtrack_ffmpeg_gui.settings.json` (`%LOCALAPPDATA%\Programs\PitaTrack\tools\mixtrack_ffmpeg_gui.settings.json` when installed).
 
 On first launch, the GUI reads `TRACKNAME_1`, `TRACKNAME_2`, `TRACKNAME_3` ..., `TRACKNAME_LATER`, `OUTPUT_SUFFIX`, `DELAY_MODE`, and `REENCODE_BITRATE` from `mixtrack_ffmpeg.bat` as defaults.
 
@@ -304,7 +348,7 @@ The CLI uses the settings saved from the GUI (`tools\mixtrack_ffmpeg_gui.setting
 
 If GUI settings have not been saved yet, the `mixtrack_ffmpeg.bat` settings below (track names, suffix, delay method, bitrate) are used. They are also the GUI's defaults on first launch.
 
-Edit `mixtrack_ffmpeg.bat` to change CLI defaults.
+Edit `mixtrack_ffmpeg.bat` to change CLI defaults. When installed, it is `%LOCALAPPDATA%\Programs\PitaTrack\mixtrack_ffmpeg.bat`. Updating replaces it, so set your changes again after an update.
 
 #### Use the Source Video's Audio
 
@@ -376,10 +420,39 @@ Check the following in MPC-BE or another player:
 
 ## Troubleshooting
 
+### Opening setup Says the Files Needed for Setup Were Not Found
+
+You are opening `setup` directly inside the ZIP file. Right-click the ZIP file, choose **Extract All**, and open `setup` in the extracted folder.
+
+### Nothing Happens When Opening setup (Smart App Control)
+
+Windows 11 **Smart App Control** may be on.
+
+Smart App Control is a Windows feature that blocks apps whose trust cannot be confirmed. PitaTrack is an unsigned app made by an individual developer, so it is blocked on PCs where Smart App Control is on. There is no way to allow a single app. On new PCs, Windows may turn it on automatically after you have used the PC for a while. If it is turned on after installation, PitaTrack also stops opening.
+
+To check:
+
+1. Open **Windows Security** from the Start menu.
+2. Open **App & browser control** → **Smart App Control settings**.
+3. If it is **On**, this is the cause. If it is **Evaluation** or **Off**, the cause is something else.
+
+To use PitaTrack, turn Smart App Control **Off**, then open `setup` again.
+
+Before turning it off, note the following:
+
+- Turning it off stops the protection against apps whose trust cannot be confirmed. Decide for yourself whether to turn it off.
+- Windows updates from April 2026 onward let you turn it back on after turning it off. However, some PCs with the October 2026 update (KB5127648) are reported to be unable to turn it back on.
+
 ### ffmpeg.exe Was Not Found
 
-Make sure `tools\ffmpeg.exe` exists.
+Both the GUI and the CLI show a download window when `ffmpeg.exe` is not found. Press **ダウンロード** (download).
+
+If the download does not work, for example because you are offline, download `ffmpeg.exe` from [ffmpeg.org](https://ffmpeg.org/download.html) and copy it into the `tools` folder.
 The CLI first checks `tools\ffmpeg.exe`, then checks `ffmpeg.exe` in the root folder.
+
+### Send To Is Not in the Right-Click Menu
+
+In Windows 11, choose **Right click → Show more options** to see **Send To**.
 
 ### No .mp4 Video File Was Found
 
@@ -388,7 +461,9 @@ The first `.mp4` file found is used as the video.
 
 ### Send To Points to an Old Folder
 
-If you moved the ffmpegMp4Mix folder, run `tools\removesendto` to delete the old shortcuts, then run `tools\makesendto` again.
+If you installed the tool, run `setup` from the new ZIP again.
+
+If you use the tool without installing it and moved its folder, run `tools\removesendto` to delete the old shortcuts, then run `tools\makesendto` again.
 
 ### CLI Text Looks Garbled
 
@@ -416,3 +491,20 @@ Switch the delay method to re-encode (GUI: **Settings**, CLI: `DELAY_MODE=reenco
 ## Background
 
 This tool is intended for users who previously used tools such as `L-SMASH Muxer` to combine video and audio, and want a simple way to create MP4 files with named audio tracks.
+
+PitaTrack was formerly called ffmpegMp4Mix.
+
+The ffmpeg downloaded by setup and the download window is the [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) Windows build (essentials, GPL). It is downloaded from the [files published on GitHub](https://github.com/GyanD/codexffmpeg/releases), checked with SHA256, and then `ffmpeg.exe` is extracted.
+
+## Building the Release ZIP (for Developers)
+
+```bat
+powershell -NoProfile -ExecutionPolicy Bypass -File dev\build_release.ps1
+```
+
+This creates `dist\PitaTrack_vX.Y.Z.zip`.
+
+- The version is read from `$Script:AppVersion` in `tools\setup.ps1`. Update it before a release.
+- Only files tracked by git are included (the `dev` folder and `ffmpeg.exe` are not). Run `git add` for new files first.
+- To change the ffmpeg version that is downloaded, change `$Script:FfmpegUrl` and `$Script:FfmpegSha256` in `tools\setup.ps1` together.
+- The icon is `tools\pitatrack.ico`. If you replace it, the next installation (or `tools\makesendto` run) uses it for `PitaTrack.exe`, the shortcuts, and the windows.
