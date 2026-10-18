@@ -21,6 +21,7 @@ $Script:VideoFile = $null
 $Script:AudioFiles = @()
 $Script:DefaultOutputPath = $null
 $Script:SavedOutputPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+$Script:AutoOffsetReference = $null
 
 function New-DefaultSettings {
     [PSCustomObject]@{
@@ -34,7 +35,18 @@ function New-DefaultSettings {
         DelayMode           = 'copy'
         ReencodeBitrate     = '256k'
         OffsetStepMs        = 100
+        AutoOffsetAlways    = $false
     }
+}
+
+function ConvertTo-SettingFlag {
+    param([object]$Value)
+
+    if ($Value -is [bool]) {
+        return $Value
+    }
+
+    return ([string]$Value).Trim() -eq 'true'
 }
 
 function ConvertTo-OffsetStepMs {
@@ -247,7 +259,8 @@ function ConvertTo-SavedSettings {
         [string[]]$TrackNameCandidates = $null,
         [string]$DelayMode = 'copy',
         [string]$ReencodeBitrate = '256k',
-        [object]$OffsetStepMs = 100
+        [object]$OffsetStepMs = 100,
+        [object]$AutoOffsetAlways = $false
     )
 
     $orderedNames = [ordered]@{}
@@ -276,6 +289,7 @@ function ConvertTo-SavedSettings {
         DelayMode           = ConvertTo-DelayMode $DelayMode
         ReencodeBitrate     = ConvertTo-ReencodeBitrate $ReencodeBitrate
         OffsetStepMs        = ConvertTo-OffsetStepMs $OffsetStepMs
+        AutoOffsetAlways    = ConvertTo-SettingFlag $AutoOffsetAlways
     }
 }
 
@@ -326,6 +340,7 @@ function Read-Settings {
         DelayMode       = [string]$settings.DelayMode
         ReencodeBitrate = [string]$settings.ReencodeBitrate
         OffsetStepMs    = $settings.OffsetStepMs
+        AutoOffsetAlways = $settings.AutoOffsetAlways
     }
     if ($null -ne $settings.PSObject.Properties['TrackNameCandidates']) {
         $convertParams.TrackNameCandidates = @(Get-TrackNameCandidates -Settings $settings)
@@ -622,6 +637,28 @@ function Format-AutoOffsetNote {
         $note += "`r`n" + ('テンポか長さが違う可能性があります（曲の途中で最大 {0:0}ms ずれます）。' -f $Result.DriftMs)
     }
     return $note
+}
+
+function Get-AutoOffsetReference {
+    param(
+        [string]$FfmpegPath,
+        [string]$VideoFile
+    )
+
+    $file = Get-Item -LiteralPath $VideoFile
+    $cache = $Script:AutoOffsetReference
+    if ($null -ne $cache -and $cache.Path -eq $file.FullName -and $cache.Length -eq $file.Length -and $cache.WriteTicks -eq $file.LastWriteTimeUtc.Ticks) {
+        return $cache.Features
+    }
+
+    $features = [AudioOffsetAnalyzer]::Load($FfmpegPath, $file.FullName)
+    $Script:AutoOffsetReference = [PSCustomObject]@{
+        Path       = $file.FullName
+        Length     = $file.Length
+        WriteTicks = $file.LastWriteTimeUtc.Ticks
+        Features   = $features
+    }
+    return $features
 }
 
 function Set-OffsetCellNote {
@@ -1459,8 +1496,8 @@ function Show-SettingsDialog {
     $dialog = New-Object System.Windows.Forms.Form
     $dialog.Text = '設定'
     $dialog.StartPosition = 'CenterParent'
-    $dialog.Size = New-Object System.Drawing.Size(560, 672)
-    $dialog.MinimumSize = New-Object System.Drawing.Size(520, 592)
+    $dialog.Size = New-Object System.Drawing.Size(560, 704)
+    $dialog.MinimumSize = New-Object System.Drawing.Size(520, 624)
     Set-FormTheme -Form $dialog
 
     $grid = New-Object System.Windows.Forms.DataGridView
@@ -1603,20 +1640,29 @@ function Show-SettingsDialog {
     $offsetStepText.TabIndex = 8
     Set-TextBoxTheme -TextBox $offsetStepText
 
+    $autoOffsetCheck = New-Object System.Windows.Forms.CheckBox
+    $autoOffsetCheck.Text = '自動調整を常に行う（開いたとき・トラック追加時・動画変更時）'
+    $autoOffsetCheck.Checked = ConvertTo-SettingFlag $CurrentSettings.AutoOffsetAlways
+    $autoOffsetCheck.Location = New-Object System.Drawing.Point(12, 532)
+    $autoOffsetCheck.Size = New-Object System.Drawing.Size(520, 24)
+    $autoOffsetCheck.Anchor = 'Left,Right,Bottom'
+    $autoOffsetCheck.TabIndex = 9
+    Set-CheckBoxTheme -CheckBox $autoOffsetCheck
+
     $okButton = New-Object System.Windows.Forms.Button
     $okButton.Text = '保存'
-    $okButton.Location = New-Object System.Drawing.Point(356, 586)
+    $okButton.Location = New-Object System.Drawing.Point(356, 618)
     $okButton.Size = New-Object System.Drawing.Size(84, 30)
     $okButton.Anchor = 'Right,Bottom'
-    $okButton.TabIndex = 9
+    $okButton.TabIndex = 10
     Set-ButtonTheme -Button $okButton -Kind Primary
 
     $cancelButton = New-Object System.Windows.Forms.Button
     $cancelButton.Text = 'キャンセル'
-    $cancelButton.Location = New-Object System.Drawing.Point(448, 586)
+    $cancelButton.Location = New-Object System.Drawing.Point(448, 618)
     $cancelButton.Size = New-Object System.Drawing.Size(84, 30)
     $cancelButton.Anchor = 'Right,Bottom'
-    $cancelButton.TabIndex = 10
+    $cancelButton.TabIndex = 11
     $cancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     Set-ButtonTheme -Button $cancelButton
 
@@ -1699,7 +1745,7 @@ function Show-SettingsDialog {
         }
 
         $candidates = @(ConvertTo-TrackNameCandidateList -Candidates $candidateText.Lines)
-        $newSettings = ConvertTo-SavedSettings -TrackNames $trackNames -LaterName $later -OutputSuffix $suffix -TrackNameCandidates $candidates -DelayMode $delayMode -ReencodeBitrate $bitrate -OffsetStepMs $offsetStepMs
+        $newSettings = ConvertTo-SavedSettings -TrackNames $trackNames -LaterName $later -OutputSuffix $suffix -TrackNameCandidates $candidates -DelayMode $delayMode -ReencodeBitrate $bitrate -OffsetStepMs $offsetStepMs -AutoOffsetAlways $autoOffsetCheck.Checked
         Save-Settings $newSettings
         $dialog.Tag = $newSettings
         $dialog.DialogResult = [System.Windows.Forms.DialogResult]::OK
@@ -1712,7 +1758,7 @@ function Show-SettingsDialog {
         $grid, $addButton, $deleteButton, $candidateLabel, $candidateText,
         $laterLabel, $laterText, $suffixLabel, $suffixText,
         $delayModeLabel, $delayModeCombo, $bitrateLabel, $bitrateText,
-        $offsetStepLabel, $offsetStepText, $okButton, $cancelButton
+        $offsetStepLabel, $offsetStepText, $autoOffsetCheck, $okButton, $cancelButton
     ))
 
     if ($grid.Rows.Count -gt 0) {
@@ -1976,8 +2022,12 @@ function Show-MainForm {
     $offsetErrorMessage = 'オフセットは整数（ミリ秒）で入力してください。元の値に戻しました。'
     $allOffsetErrorMessage = '全トラックをずらす量は整数（ミリ秒）で入力してください。'
     $autoOffsetState = [PSCustomObject]@{
-        Running = $false
+        Running     = $false
+        PendingAll  = $false
+        PendingRows = New-Object System.Collections.ArrayList
     }
+    $autoOffsetTimer = New-Object System.Windows.Forms.Timer
+    $autoOffsetTimer.Interval = 150
     $trackDragState = [PSCustomObject]@{
         RowIndex = -1
         Box = [System.Drawing.Rectangle]::Empty
@@ -2245,24 +2295,63 @@ function Show-MainForm {
             }
         }
         Update-VideoAudioRows
+        Request-AutoOffset
+    }
+
+    function Request-AutoOffset {
+        param([object[]]$Rows = $null)
+
+        if (-not (ConvertTo-SettingFlag $Script:Settings.AutoOffsetAlways)) {
+            return
+        }
+
+        if ($null -eq $Rows) {
+            $autoOffsetState.PendingAll = $true
+        }
+        else {
+            foreach ($row in $Rows) {
+                [void]$autoOffsetState.PendingRows.Add($row)
+            }
+        }
+        $autoOffsetTimer.Stop()
+        $autoOffsetTimer.Start()
     }
 
     function Invoke-AutoOffset {
+        param(
+            [object[]]$TargetRows = $null,
+            [switch]$Automatic
+        )
+
+        if ($autoOffsetState.Running) {
+            return
+        }
+
         Complete-TrackNameEdit -Grid $grid -TrackNameColumnIndex $trackNameColumnIndex
         if (-not (Test-VideoSelected) -or -not (Test-Path -LiteralPath $Script:VideoFile -PathType Leaf)) {
-            Show-ErrorMessage '動画ファイルを指定してください。'
+            if (-not $Automatic) {
+                Show-ErrorMessage '動画ファイルを指定してください。'
+            }
             return
         }
 
         $ffmpegPath = Get-SupportFilePath -FileName 'ffmpeg.exe'
         if (-not (Test-Path -LiteralPath $ffmpegPath)) {
-            Show-ErrorMessage "ffmpeg.exe が見つかりません。`r`n$ffmpegPath"
+            if ($Automatic) {
+                $statusLabel.Text = '自動調整: ffmpeg.exe が見つからないため調整できませんでした。'
+            }
+            else {
+                Show-ErrorMessage "ffmpeg.exe が見つかりません。`r`n$ffmpegPath"
+            }
             return
         }
 
-        $rows = @($grid.Rows | Where-Object { -not $_.IsNewRow -and $null -ne $_.Tag -and -not [bool]$_.Tag.IsVideoAudio })
+        $candidateRows = if ($null -eq $TargetRows) { @($grid.Rows) } else { @($TargetRows) }
+        $rows = @($candidateRows | Where-Object { $null -ne $_.DataGridView -and -not $_.IsNewRow -and $null -ne $_.Tag -and -not [bool]$_.Tag.IsVideoAudio })
         if ($rows.Count -eq 0) {
-            Show-ErrorMessage '自動調整するトラックがありません。'
+            if (-not $Automatic) {
+                Show-ErrorMessage '自動調整するトラックがありません。'
+            }
             return
         }
 
@@ -2279,11 +2368,17 @@ function Show-MainForm {
             $statusLabel.Text = '自動調整中: 動画の音声を解析しています...'
             [System.Windows.Forms.Application]::DoEvents()
             try {
-                $reference = [AudioOffsetAnalyzer]::Load($ffmpegPath, $Script:VideoFile)
+                $reference = Get-AutoOffsetReference -FfmpegPath $ffmpegPath -VideoFile $Script:VideoFile
             }
             catch {
-                $statusLabel.Text = ''
-                Show-ErrorMessage ("動画の音声を解析できませんでした。`r`n`r`n" + $_.Exception.GetBaseException().Message)
+                $message = $_.Exception.GetBaseException().Message
+                if ($Automatic) {
+                    $statusLabel.Text = '自動調整: 動画の音声を解析できませんでした。'
+                }
+                else {
+                    $statusLabel.Text = ''
+                    Show-ErrorMessage ("動画の音声を解析できませんでした。`r`n`r`n" + $message)
+                }
                 return
             }
 
@@ -2426,6 +2521,10 @@ function Show-MainForm {
     function Set-VideoDropEffect {
         param([System.Windows.Forms.DragEventArgs]$DragEvent)
 
+        if ($autoOffsetState.Running) {
+            $DragEvent.Effect = [System.Windows.Forms.DragDropEffects]::None
+            return
+        }
         if ($DragEvent.Data.GetDataPresent([System.Windows.Forms.DataFormats]::FileDrop)) {
             $DragEvent.Effect = [System.Windows.Forms.DragDropEffects]::Copy
             return
@@ -2441,6 +2540,9 @@ function Show-MainForm {
     function Invoke-VideoDrop {
         param([System.Windows.Forms.DragEventArgs]$DragEvent)
 
+        if ($autoOffsetState.Running) {
+            return
+        }
         try {
             if ($DragEvent.Data.GetDataPresent([System.Windows.Forms.DataFormats]::FileDrop)) {
                 $droppedVideo = Get-FirstMp4FilePath @($DragEvent.Data.GetData([System.Windows.Forms.DataFormats]::FileDrop))
@@ -2724,6 +2826,9 @@ function Show-MainForm {
                 if ($addedCount -eq 0 -and -not $selectedVideoFromDrop) {
                     Show-ErrorMessage '追加できるファイルがありませんでした。'
                 }
+                if ($addedCount -gt 0) {
+                    Request-AutoOffset -Rows @($grid.Rows | Select-Object -Last $addedCount)
+                }
                 return
             }
 
@@ -2746,10 +2851,33 @@ function Show-MainForm {
     $allOffsetPlusButton.Add_Click({ Step-TrackOffsets -Direction 1 -AllTracks })
     $allOffsetApplyButton.Add_Click({ Invoke-AllTrackOffsetInput })
     $autoOffsetButton.Add_Click({ Invoke-AutoOffset })
+    $autoOffsetTimer.Add_Tick({
+        if ($autoOffsetState.Running) {
+            return
+        }
+        $autoOffsetTimer.Stop()
+        if ($form.IsDisposed -or -not $form.Visible) {
+            return
+        }
+
+        $pendingAll = $autoOffsetState.PendingAll
+        $pendingRows = @($autoOffsetState.PendingRows.ToArray())
+        $autoOffsetState.PendingAll = $false
+        $autoOffsetState.PendingRows.Clear()
+        if ($pendingAll) {
+            Invoke-AutoOffset -Automatic
+        }
+        elseif ($pendingRows.Count -gt 0) {
+            Invoke-AutoOffset -TargetRows $pendingRows -Automatic
+        }
+    })
     $form.Add_FormClosing({
         if ($autoOffsetState.Running) {
             $_.Cancel = $true
         }
+    })
+    $form.Add_FormClosed({
+        $autoOffsetTimer.Stop()
     })
     $allOffsetText.Add_Enter({ $form.AcceptButton = $allOffsetApplyButton })
     $allOffsetText.Add_Leave({ $form.AcceptButton = $okButton })
@@ -2792,6 +2920,9 @@ function Show-MainForm {
             $addedCount = Add-TrackFilesToGrid -Grid $grid -FilePaths @($dialog.FileNames) -Settings $Script:Settings
             if ($addedCount -eq 0) {
                 Show-ErrorMessage '追加できるファイルがありませんでした。'
+            }
+            else {
+                Request-AutoOffset -Rows @($grid.Rows | Select-Object -Last $addedCount)
             }
         }
     })
@@ -2979,6 +3110,7 @@ function Show-MainForm {
             $grid.Focus() | Out-Null
             $grid.CurrentCell = $grid.Rows[0].Cells[1]
         }
+        Request-AutoOffset
     })
 
     [void]$form.ShowDialog()

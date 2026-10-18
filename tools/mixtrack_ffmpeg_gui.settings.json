@@ -15,5 +15,6 @@
                             ],
     "DelayMode":  "copy",
     "ReencodeBitrate":  "256k",
-    "OffsetStepMs":  100
+    "OffsetStepMs":  100,
+    "AutoOffsetAlways":  false
 }

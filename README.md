@@ -177,6 +177,10 @@ Press **自動調整** (auto-adjust) to compare each track with the video's audi
   | 低 (low) | Nothing is changed and the cell turns red. |
 
 - Hover over the cell to see the detected lag and confidence.
+- Turn on **自動調整を常に行う** (always auto-adjust) in Settings to run it automatically, without pressing the button:
+  - When the window opens (all tracks)
+  - When tracks are added (only the added tracks)
+  - When the video is changed (all tracks)
 - If any low-confidence (red) track is left when you press **保存** (save), a confirmation dialog is shown. Editing that track's offset by hand or with the **選択トラック** (selected track) ± buttons (`Ctrl + Up` / `Ctrl + Down`) removes it from the check. Shifting all tracks at once does not.
 - Recordings played at a different speed (such as a live take with a different tempo) cannot be aligned with a single offset, so a note says the tempo or length may differ.
 - Lags up to 180 seconds in either direction are searched, and the first 15 minutes of each file are analyzed.
@@ -255,6 +259,7 @@ Use the GUI **Settings** button to change:
 - Output file suffix
 - Delay method and re-encoding bitrate
 - Step used by the offset buttons
+- Whether to always auto-adjust
 
 GUI settings are saved to `tools\mixtrack_ffmpeg_gui.settings.json`.
 
