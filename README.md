@@ -102,6 +102,8 @@ If Windows shows "The publisher could not be verified. Are you sure you want to 
 
 When you open `setup`, a console window flashes briefly before the setup window appears.
 
+On PCs where Windows 11 **Smart App Control** is on, PitaTrack may be blocked and not run. If nothing happens when you open `setup`, or Windows says Smart App Control blocked it, see [Nothing Happens When Opening setup (Smart App Control)](#nothing-happens-when-opening-setup-smart-app-control).
+
 #### Updating
 
 Follow the same steps with the ZIP of the new version. The window says it will update, and your settings and `ffmpeg.exe` are kept.
@@ -421,6 +423,25 @@ Check the following in MPC-BE or another player:
 ### Opening setup Says the Files Needed for Setup Were Not Found
 
 You are opening `setup` directly inside the ZIP file. Right-click the ZIP file, choose **Extract All**, and open `setup` in the extracted folder.
+
+### Nothing Happens When Opening setup (Smart App Control)
+
+Windows 11 **Smart App Control** may be on.
+
+Smart App Control is a Windows feature that blocks apps whose trust cannot be confirmed. PitaTrack is an unsigned app made by an individual developer, so it is blocked on PCs where Smart App Control is on. There is no way to allow a single app. On new PCs, Windows may turn it on automatically after you have used the PC for a while. If it is turned on after installation, PitaTrack also stops opening.
+
+To check:
+
+1. Open **Windows Security** from the Start menu.
+2. Open **App & browser control** → **Smart App Control settings**.
+3. If it is **On**, this is the cause. If it is **Evaluation** or **Off**, the cause is something else.
+
+To use PitaTrack, turn Smart App Control **Off**, then open `setup` again.
+
+Before turning it off, note the following:
+
+- Turning it off stops the protection against apps whose trust cannot be confirmed. Decide for yourself whether to turn it off.
+- Windows updates from April 2026 onward let you turn it back on after turning it off. However, some PCs with the October 2026 update (KB5127648) are reported to be unable to turn it back on.
 
 ### ffmpeg.exe Was Not Found
 
