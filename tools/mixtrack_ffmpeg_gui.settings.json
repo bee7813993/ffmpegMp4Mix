@@ -14,5 +14,6 @@
                                 "ボーカルカット"
                             ],
     "DelayMode":  "copy",
-    "ReencodeBitrate":  "256k"
+    "ReencodeBitrate":  "256k",
+    "OffsetStepMs":  100
 }

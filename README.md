@@ -138,6 +138,17 @@ If the video field is empty and multiple files are dropped onto the track list, 
 
 - Enter the shift in milliseconds in the **Offset (ms)** column (`オフセット(ms)` in the GUI).
 - `+500` delays the track by 0.5 seconds, and `-500` makes it start 0.5 seconds earlier. `0` or an empty cell means no shift.
+- You can also use the buttons above the track list or the keyboard.
+
+  | Action | Button | Keyboard |
+  |---|---|---|
+  | Change the selected track | `-100ms` / `+100ms` next to **選択トラック** (selected track) | `Ctrl + Down` / `Ctrl + Up` |
+  | Change every track | `-100ms` / `+100ms` next to **全トラック** (all tracks) | `Ctrl + Shift + Down` / `Ctrl + Shift + Up` |
+  | Shift every track by a given amount | Enter a value in the **全トラック** box and press **ずらす** (shift), or press `Enter` in the box | - |
+
+  - Change the step with **オフセット増減幅(ms)** (offset step) in Settings. The default is 100 ms.
+  - The keyboard shortcuts work wherever the focus is in the window. The selected track is the row highlighted in blue in the track list.
+  - **ずらす** adds the entered value to each track's current offset, so the differences between tracks are kept.
 - Starting earlier trims the beginning of the audio (no re-encoding).
 - Delaying follows the **delay method** setting. See [Delay Method](#delay-method) for details.
 - If you enter something other than an integer, the previous value is restored.
@@ -212,6 +223,7 @@ Use the GUI **Settings** button to change:
 - Default name for later tracks
 - Output file suffix
 - Delay method and re-encoding bitrate
+- Step used by the offset buttons
 
 GUI settings are saved to `tools\mixtrack_ffmpeg_gui.settings.json`.
 

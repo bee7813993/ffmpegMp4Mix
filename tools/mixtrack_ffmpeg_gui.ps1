@@ -32,7 +32,19 @@ function New-DefaultSettings {
         TrackNameCandidates = @('オンボーカル', 'オフボーカル', 'トラック')
         DelayMode           = 'copy'
         ReencodeBitrate     = '256k'
+        OffsetStepMs        = 100
     }
+}
+
+function ConvertTo-OffsetStepMs {
+    param([object]$Value)
+
+    $stepMs = 0
+    if ([int]::TryParse(([string]$Value).Trim(), [ref]$stepMs) -and $stepMs -gt 0) {
+        return $stepMs
+    }
+
+    return 100
 }
 
 function ConvertTo-DelayMode {
@@ -233,7 +245,8 @@ function ConvertTo-SavedSettings {
         [string]$OutputSuffix,
         [string[]]$TrackNameCandidates = $null,
         [string]$DelayMode = 'copy',
-        [string]$ReencodeBitrate = '256k'
+        [string]$ReencodeBitrate = '256k',
+        [object]$OffsetStepMs = 100
     )
 
     $orderedNames = [ordered]@{}
@@ -261,6 +274,7 @@ function ConvertTo-SavedSettings {
         TrackNameCandidates = @($candidates.ToArray())
         DelayMode           = ConvertTo-DelayMode $DelayMode
         ReencodeBitrate     = ConvertTo-ReencodeBitrate $ReencodeBitrate
+        OffsetStepMs        = ConvertTo-OffsetStepMs $OffsetStepMs
     }
 }
 
@@ -310,6 +324,7 @@ function Read-Settings {
         OutputSuffix    = $suffix
         DelayMode       = [string]$settings.DelayMode
         ReencodeBitrate = [string]$settings.ReencodeBitrate
+        OffsetStepMs    = $settings.OffsetStepMs
     }
     if ($null -ne $settings.PSObject.Properties['TrackNameCandidates']) {
         $convertParams.TrackNameCandidates = @(Get-TrackNameCandidates -Settings $settings)
@@ -323,6 +338,31 @@ function Save-Settings {
 
     $json = $Settings | ConvertTo-Json -Depth 8
     Set-Content -LiteralPath $Script:ConfigPath -Value $json -Encoding UTF8
+}
+
+function Test-TrackNameDefaultsChanged {
+    param(
+        [object]$OldSettings,
+        [object]$NewSettings
+    )
+
+    if ([string]$OldSettings.LaterName -cne [string]$NewSettings.LaterName) {
+        return $true
+    }
+
+    $oldMap = Get-TrackNameMap $OldSettings
+    $newMap = Get-TrackNameMap $NewSettings
+    if ($oldMap.Count -ne $newMap.Count) {
+        return $true
+    }
+
+    foreach ($key in @($oldMap.Keys)) {
+        if (-not $newMap.ContainsKey($key) -or [string]$oldMap[$key] -cne [string]$newMap[$key]) {
+            return $true
+        }
+    }
+
+    return $false
 }
 
 function Get-DefaultTrackName {
@@ -1364,8 +1404,8 @@ function Show-SettingsDialog {
     $dialog = New-Object System.Windows.Forms.Form
     $dialog.Text = '設定'
     $dialog.StartPosition = 'CenterParent'
-    $dialog.Size = New-Object System.Drawing.Size(560, 640)
-    $dialog.MinimumSize = New-Object System.Drawing.Size(520, 560)
+    $dialog.Size = New-Object System.Drawing.Size(560, 672)
+    $dialog.MinimumSize = New-Object System.Drawing.Size(520, 592)
     Set-FormTheme -Form $dialog
 
     $grid = New-Object System.Windows.Forms.DataGridView
@@ -1493,20 +1533,35 @@ function Show-SettingsDialog {
     $bitrateText.Enabled = $delayModeCombo.SelectedIndex -eq 1
     Set-TextBoxTheme -TextBox $bitrateText
 
+    $offsetStepLabel = New-Object System.Windows.Forms.Label
+    $offsetStepLabel.Text = 'オフセット増減幅(ms)'
+    $offsetStepLabel.Location = New-Object System.Drawing.Point(12, 502)
+    $offsetStepLabel.Size = New-Object System.Drawing.Size(140, 22)
+    $offsetStepLabel.Anchor = 'Left,Bottom'
+    Set-LabelTheme -Label $offsetStepLabel -Muted
+
+    $offsetStepText = New-Object System.Windows.Forms.TextBox
+    $offsetStepText.Text = [string](ConvertTo-OffsetStepMs $CurrentSettings.OffsetStepMs)
+    $offsetStepText.Location = New-Object System.Drawing.Point(158, 499)
+    $offsetStepText.Size = New-Object System.Drawing.Size(120, 22)
+    $offsetStepText.Anchor = 'Left,Bottom'
+    $offsetStepText.TabIndex = 8
+    Set-TextBoxTheme -TextBox $offsetStepText
+
     $okButton = New-Object System.Windows.Forms.Button
     $okButton.Text = '保存'
-    $okButton.Location = New-Object System.Drawing.Point(356, 554)
+    $okButton.Location = New-Object System.Drawing.Point(356, 586)
     $okButton.Size = New-Object System.Drawing.Size(84, 30)
     $okButton.Anchor = 'Right,Bottom'
-    $okButton.TabIndex = 8
+    $okButton.TabIndex = 9
     Set-ButtonTheme -Button $okButton -Kind Primary
 
     $cancelButton = New-Object System.Windows.Forms.Button
     $cancelButton.Text = 'キャンセル'
-    $cancelButton.Location = New-Object System.Drawing.Point(448, 554)
+    $cancelButton.Location = New-Object System.Drawing.Point(448, 586)
     $cancelButton.Size = New-Object System.Drawing.Size(84, 30)
     $cancelButton.Anchor = 'Right,Bottom'
-    $cancelButton.TabIndex = 9
+    $cancelButton.TabIndex = 10
     $cancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     Set-ButtonTheme -Button $cancelButton
 
@@ -1582,8 +1637,14 @@ function Show-SettingsDialog {
             return
         }
 
+        $offsetStepMs = ConvertTo-OffsetMs $offsetStepText.Text
+        if ($null -eq $offsetStepMs -or $offsetStepMs -le 0) {
+            Show-ErrorMessage 'オフセット増減幅には1以上の整数（ミリ秒）を入力してください。'
+            return
+        }
+
         $candidates = @(ConvertTo-TrackNameCandidateList -Candidates $candidateText.Lines)
-        $newSettings = ConvertTo-SavedSettings -TrackNames $trackNames -LaterName $later -OutputSuffix $suffix -TrackNameCandidates $candidates -DelayMode $delayMode -ReencodeBitrate $bitrate
+        $newSettings = ConvertTo-SavedSettings -TrackNames $trackNames -LaterName $later -OutputSuffix $suffix -TrackNameCandidates $candidates -DelayMode $delayMode -ReencodeBitrate $bitrate -OffsetStepMs $offsetStepMs
         Save-Settings $newSettings
         $dialog.Tag = $newSettings
         $dialog.DialogResult = [System.Windows.Forms.DialogResult]::OK
@@ -1595,7 +1656,8 @@ function Show-SettingsDialog {
     $dialog.Controls.AddRange(@(
         $grid, $addButton, $deleteButton, $candidateLabel, $candidateText,
         $laterLabel, $laterText, $suffixLabel, $suffixText,
-        $delayModeLabel, $delayModeCombo, $bitrateLabel, $bitrateText, $okButton, $cancelButton
+        $delayModeLabel, $delayModeCombo, $bitrateLabel, $bitrateText,
+        $offsetStepLabel, $offsetStepText, $okButton, $cancelButton
     ))
 
     if ($grid.Rows.Count -gt 0) {
@@ -1650,9 +1712,61 @@ function Show-MainForm {
     $useVideoAudio.Enabled = Test-VideoSelected
     Set-CheckBoxTheme -CheckBox $useVideoAudio
 
+    $offsetToolTip = New-Object System.Windows.Forms.ToolTip
+
+    $selectedOffsetLabel = New-Object System.Windows.Forms.Label
+    $selectedOffsetLabel.Text = '選択トラック:'
+    $selectedOffsetLabel.Location = New-Object System.Drawing.Point(12, 79)
+    $selectedOffsetLabel.Size = New-Object System.Drawing.Size(80, 22)
+    Set-LabelTheme -Label $selectedOffsetLabel -Muted
+
+    $selectedOffsetMinusButton = New-Object System.Windows.Forms.Button
+    $selectedOffsetMinusButton.Location = New-Object System.Drawing.Point(94, 74)
+    $selectedOffsetMinusButton.Size = New-Object System.Drawing.Size(64, 28)
+    $selectedOffsetMinusButton.TabIndex = 7
+    Set-ButtonTheme -Button $selectedOffsetMinusButton
+
+    $selectedOffsetPlusButton = New-Object System.Windows.Forms.Button
+    $selectedOffsetPlusButton.Location = New-Object System.Drawing.Point(162, 74)
+    $selectedOffsetPlusButton.Size = New-Object System.Drawing.Size(64, 28)
+    $selectedOffsetPlusButton.TabIndex = 8
+    Set-ButtonTheme -Button $selectedOffsetPlusButton
+
+    $allOffsetLabel = New-Object System.Windows.Forms.Label
+    $allOffsetLabel.Text = '全トラック:'
+    $allOffsetLabel.Location = New-Object System.Drawing.Point(246, 79)
+    $allOffsetLabel.Size = New-Object System.Drawing.Size(66, 22)
+    Set-LabelTheme -Label $allOffsetLabel -Muted
+
+    $allOffsetMinusButton = New-Object System.Windows.Forms.Button
+    $allOffsetMinusButton.Location = New-Object System.Drawing.Point(314, 74)
+    $allOffsetMinusButton.Size = New-Object System.Drawing.Size(64, 28)
+    $allOffsetMinusButton.TabIndex = 9
+    Set-ButtonTheme -Button $allOffsetMinusButton
+
+    $allOffsetPlusButton = New-Object System.Windows.Forms.Button
+    $allOffsetPlusButton.Location = New-Object System.Drawing.Point(382, 74)
+    $allOffsetPlusButton.Size = New-Object System.Drawing.Size(64, 28)
+    $allOffsetPlusButton.TabIndex = 10
+    Set-ButtonTheme -Button $allOffsetPlusButton
+
+    $allOffsetText = New-Object System.Windows.Forms.TextBox
+    $allOffsetText.Location = New-Object System.Drawing.Point(462, 77)
+    $allOffsetText.Size = New-Object System.Drawing.Size(64, 22)
+    $allOffsetText.TextAlign = [System.Windows.Forms.HorizontalAlignment]::Right
+    $allOffsetText.TabIndex = 11
+    Set-TextBoxTheme -TextBox $allOffsetText
+
+    $allOffsetApplyButton = New-Object System.Windows.Forms.Button
+    $allOffsetApplyButton.Text = 'ずらす'
+    $allOffsetApplyButton.Location = New-Object System.Drawing.Point(530, 74)
+    $allOffsetApplyButton.Size = New-Object System.Drawing.Size(64, 28)
+    $allOffsetApplyButton.TabIndex = 12
+    Set-ButtonTheme -Button $allOffsetApplyButton
+
     $grid = New-Object TrackNameDataGridView
-    $grid.Location = New-Object System.Drawing.Point(12, 74)
-    $grid.Size = New-Object System.Drawing.Size(730, 330)
+    $grid.Location = New-Object System.Drawing.Point(12, 108)
+    $grid.Size = New-Object System.Drawing.Size(730, 296)
     $grid.Anchor = 'Top,Left,Right,Bottom'
     $grid.AllowUserToAddRows = $false
     $grid.AllowUserToDeleteRows = $false
@@ -1690,7 +1804,7 @@ function Show-MainForm {
 
     $upButton = New-Object System.Windows.Forms.Button
     $upButton.Text = '↑ 上へ'
-    $upButton.Location = New-Object System.Drawing.Point(754, 74)
+    $upButton.Location = New-Object System.Drawing.Point(754, 108)
     $upButton.Size = New-Object System.Drawing.Size(94, 30)
     $upButton.Anchor = 'Top,Right'
     $upButton.TabIndex = 3
@@ -1698,7 +1812,7 @@ function Show-MainForm {
 
     $downButton = New-Object System.Windows.Forms.Button
     $downButton.Text = '↓ 下へ'
-    $downButton.Location = New-Object System.Drawing.Point(754, 110)
+    $downButton.Location = New-Object System.Drawing.Point(754, 144)
     $downButton.Size = New-Object System.Drawing.Size(94, 30)
     $downButton.Anchor = 'Top,Right'
     $downButton.TabIndex = 4
@@ -1706,7 +1820,7 @@ function Show-MainForm {
 
     $addTrackButton = New-Object System.Windows.Forms.Button
     $addTrackButton.Text = '+ 追加'
-    $addTrackButton.Location = New-Object System.Drawing.Point(754, 154)
+    $addTrackButton.Location = New-Object System.Drawing.Point(754, 188)
     $addTrackButton.Size = New-Object System.Drawing.Size(94, 30)
     $addTrackButton.Anchor = 'Top,Right'
     $addTrackButton.TabIndex = 5
@@ -1714,7 +1828,7 @@ function Show-MainForm {
 
     $deleteTrackButton = New-Object System.Windows.Forms.Button
     $deleteTrackButton.Text = '- 削除'
-    $deleteTrackButton.Location = New-Object System.Drawing.Point(754, 190)
+    $deleteTrackButton.Location = New-Object System.Drawing.Point(754, 224)
     $deleteTrackButton.Size = New-Object System.Drawing.Size(94, 30)
     $deleteTrackButton.Anchor = 'Top,Right'
     $deleteTrackButton.TabIndex = 6
@@ -1732,7 +1846,7 @@ function Show-MainForm {
     $outputText.Location = New-Object System.Drawing.Point(88, 417)
     $outputText.Size = New-Object System.Drawing.Size(654, 22)
     $outputText.Anchor = 'Left,Right,Bottom'
-    $outputText.TabIndex = 7
+    $outputText.TabIndex = 13
     Set-TextBoxTheme -TextBox $outputText
 
     $browseButton = New-Object System.Windows.Forms.Button
@@ -1740,7 +1854,7 @@ function Show-MainForm {
     $browseButton.Location = New-Object System.Drawing.Point(754, 414)
     $browseButton.Size = New-Object System.Drawing.Size(94, 28)
     $browseButton.Anchor = 'Right,Bottom'
-    $browseButton.TabIndex = 8
+    $browseButton.TabIndex = 14
     Set-ButtonTheme -Button $browseButton
 
     $settingsButton = New-Object System.Windows.Forms.Button
@@ -1748,7 +1862,7 @@ function Show-MainForm {
     $settingsButton.Location = New-Object System.Drawing.Point(12, 484)
     $settingsButton.Size = New-Object System.Drawing.Size(94, 30)
     $settingsButton.Anchor = 'Left,Bottom'
-    $settingsButton.TabIndex = 9
+    $settingsButton.TabIndex = 15
     Set-ButtonTheme -Button $settingsButton
 
     $statusLabel = New-Object System.Windows.Forms.Label
@@ -1763,7 +1877,7 @@ function Show-MainForm {
     $okButton.Location = New-Object System.Drawing.Point(656, 484)
     $okButton.Size = New-Object System.Drawing.Size(92, 30)
     $okButton.Anchor = 'Right,Bottom'
-    $okButton.TabIndex = 10
+    $okButton.TabIndex = 16
     Set-ButtonTheme -Button $okButton -Kind Primary
 
     $cancelButton = New-Object System.Windows.Forms.Button
@@ -1771,7 +1885,7 @@ function Show-MainForm {
     $cancelButton.Location = New-Object System.Drawing.Point(756, 484)
     $cancelButton.Size = New-Object System.Drawing.Size(92, 30)
     $cancelButton.Anchor = 'Right,Bottom'
-    $cancelButton.TabIndex = 11
+    $cancelButton.TabIndex = 17
     $cancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     Set-ButtonTheme -Button $cancelButton
 
@@ -1781,9 +1895,86 @@ function Show-MainForm {
     $offsetColumnIndex = 2
     $sourceColumnIndex = 3
     $offsetErrorMessage = 'オフセットは整数（ミリ秒）で入力してください。元の値に戻しました。'
+    $allOffsetErrorMessage = '全トラックをずらす量は整数（ミリ秒）で入力してください。'
     $trackDragState = [PSCustomObject]@{
         RowIndex = -1
         Box = [System.Drawing.Rectangle]::Empty
+    }
+
+    function Update-OffsetStepButtons {
+        $stepMs = ConvertTo-OffsetStepMs $Script:Settings.OffsetStepMs
+        $selectedOffsetMinusButton.Text = '-' + $stepMs + 'ms'
+        $selectedOffsetPlusButton.Text = '+' + $stepMs + 'ms'
+        $allOffsetMinusButton.Text = '-' + $stepMs + 'ms'
+        $allOffsetPlusButton.Text = '+' + $stepMs + 'ms'
+        $offsetToolTip.SetToolTip($selectedOffsetMinusButton, "選択中のトラックを ${stepMs}ms 早める (Ctrl+↓)")
+        $offsetToolTip.SetToolTip($selectedOffsetPlusButton, "選択中のトラックを ${stepMs}ms 遅らせる (Ctrl+↑)")
+        $offsetToolTip.SetToolTip($allOffsetMinusButton, "全トラックを ${stepMs}ms 早める (Ctrl+Shift+↓)")
+        $offsetToolTip.SetToolTip($allOffsetPlusButton, "全トラックを ${stepMs}ms 遅らせる (Ctrl+Shift+↑)")
+        $offsetToolTip.SetToolTip($allOffsetText, '全トラックをずらす量（ミリ秒）。+ で遅らせる、- で早める')
+    }
+
+    function Step-TrackOffsets {
+        param(
+            [int]$Direction,
+            [switch]$AllTracks
+        )
+
+        $stepMs = ConvertTo-OffsetStepMs $Script:Settings.OffsetStepMs
+        Add-TrackOffsets -DeltaMs ($Direction * $stepMs) -AllTracks:$AllTracks
+    }
+
+    function Invoke-AllTrackOffsetInput {
+        $deltaMs = ConvertTo-OffsetMs $allOffsetText.Text
+        if ($null -eq $deltaMs) {
+            $statusLabel.Text = $allOffsetErrorMessage
+            return
+        }
+        if ($deltaMs -eq 0) {
+            return
+        }
+
+        Add-TrackOffsets -DeltaMs $deltaMs -AllTracks
+    }
+
+    function Add-TrackOffsets {
+        param(
+            [int]$DeltaMs,
+            [switch]$AllTracks
+        )
+
+        Complete-TrackNameEdit -Grid $grid -TrackNameColumnIndex $trackNameColumnIndex
+
+        $rows = @()
+        if ($AllTracks) {
+            $rows = @($grid.Rows | Where-Object { -not $_.IsNewRow -and $null -ne $_.Tag })
+        }
+        elseif ($null -ne $grid.CurrentCell) {
+            $rows = @($grid.Rows[$grid.CurrentCell.RowIndex])
+        }
+        elseif ($grid.SelectedRows.Count -gt 0) {
+            $rows = @($grid.SelectedRows[0])
+        }
+
+        if ($rows.Count -eq 0) {
+            Show-ErrorMessage 'オフセットを変更するトラックがありません。'
+            return
+        }
+
+        foreach ($row in $rows) {
+            $offsetMs = ConvertTo-OffsetMs $row.Cells[$offsetColumnIndex].Value
+            if ($null -eq $offsetMs) {
+                $offsetMs = [int]$row.Tag.OffsetMs
+            }
+
+            $offsetMs += $DeltaMs
+            $row.Cells[$offsetColumnIndex].Value = Format-OffsetMs $offsetMs
+            $row.Tag.OffsetMs = $offsetMs
+        }
+
+        if ($statusLabel.Text -eq $offsetErrorMessage -or $statusLabel.Text -eq $allOffsetErrorMessage) {
+            $statusLabel.Text = ''
+        }
     }
 
     function Reset-GridFromInputs {
@@ -2358,6 +2549,42 @@ function Show-MainForm {
 
     $upButton.Add_Click({ Move-CurrentTrack -Grid $grid -Delta -1 })
     $downButton.Add_Click({ Move-CurrentTrack -Grid $grid -Delta 1 })
+    $selectedOffsetMinusButton.Add_Click({ Step-TrackOffsets -Direction -1 })
+    $selectedOffsetPlusButton.Add_Click({ Step-TrackOffsets -Direction 1 })
+    $allOffsetMinusButton.Add_Click({ Step-TrackOffsets -Direction -1 -AllTracks })
+    $allOffsetPlusButton.Add_Click({ Step-TrackOffsets -Direction 1 -AllTracks })
+    $allOffsetApplyButton.Add_Click({ Invoke-AllTrackOffsetInput })
+    $allOffsetText.Add_Enter({ $form.AcceptButton = $allOffsetApplyButton })
+    $allOffsetText.Add_Leave({ $form.AcceptButton = $okButton })
+
+    $grid.Add_OffsetStepPressed({
+        if ($_.AllTracks) {
+            Step-TrackOffsets -Direction $_.Direction -AllTracks
+        }
+        else {
+            Step-TrackOffsets -Direction $_.Direction
+        }
+    })
+
+    $form.KeyPreview = $true
+    $form.Add_KeyDown({
+        $keyEvent = $_
+        $isOffsetKey = $keyEvent.Control -and -not $keyEvent.Alt -and
+            ($keyEvent.KeyCode -eq [System.Windows.Forms.Keys]::Up -or $keyEvent.KeyCode -eq [System.Windows.Forms.Keys]::Down)
+        if (-not $isOffsetKey) {
+            return
+        }
+
+        $direction = if ($keyEvent.KeyCode -eq [System.Windows.Forms.Keys]::Up) { 1 } else { -1 }
+        if ($keyEvent.Shift) {
+            Step-TrackOffsets -Direction $direction -AllTracks
+        }
+        else {
+            Step-TrackOffsets -Direction $direction
+        }
+        $keyEvent.Handled = $true
+        $keyEvent.SuppressKeyPress = $true
+    })
 
     $addTrackButton.Add_Click({
         $dialog = New-Object System.Windows.Forms.OpenFileDialog
@@ -2421,12 +2648,18 @@ function Show-MainForm {
     $settingsButton.Add_Click({
         Complete-TrackNameEdit -Grid $grid -TrackNameColumnIndex $trackNameColumnIndex
         $oldDefault = $Script:DefaultOutputPath
+        $oldSettings = $Script:Settings
         $Script:Settings = Show-SettingsDialog -CurrentSettings $Script:Settings
         Set-TrackNameCandidateColumnItems -Grid $grid -Settings $Script:Settings
+        Update-OffsetStepButtons
         $Script:DefaultOutputPath = Get-DefaultOutputPath -VideoFile $Script:VideoFile -Settings $Script:Settings
 
         if ($outputText.Text -eq $oldDefault) {
             $outputText.Text = $Script:DefaultOutputPath
+        }
+
+        if (-not (Test-TrackNameDefaultsChanged -OldSettings $oldSettings -NewSettings $Script:Settings)) {
+            return
         }
 
         $answer = [System.Windows.Forms.MessageBox]::Show(
@@ -2497,12 +2730,16 @@ function Show-MainForm {
     $form.AcceptButton = $okButton
     $form.CancelButton = $cancelButton
     $form.Controls.AddRange(@(
-        $videoLabel, $videoText, $videoBrowseButton, $useVideoAudio, $grid,
+        $videoLabel, $videoText, $videoBrowseButton, $useVideoAudio,
+        $selectedOffsetLabel, $selectedOffsetMinusButton, $selectedOffsetPlusButton,
+        $allOffsetLabel, $allOffsetMinusButton, $allOffsetPlusButton,
+        $allOffsetText, $allOffsetApplyButton, $grid,
         $upButton, $downButton, $addTrackButton, $deleteTrackButton,
         $outputLabel, $outputText, $browseButton, $settingsButton,
         $statusLabel, $okButton, $cancelButton
     ))
 
+    Update-OffsetStepButtons
     Reset-GridFromInputs
     if ($grid.Rows.Count -gt 0) {
         $grid.CurrentCell = $grid.Rows[0].Cells[1]
@@ -2534,10 +2771,40 @@ public class TrackTabEventArgs : EventArgs
     }
 }
 
+public class OffsetStepEventArgs : EventArgs
+{
+    public int Direction { get; private set; }
+    public bool AllTracks { get; private set; }
+
+    public OffsetStepEventArgs(int direction, bool allTracks)
+    {
+        Direction = direction;
+        AllTracks = allTracks;
+    }
+}
+
 public class TrackNameDataGridView : DataGridView
 {
     public event EventHandler<TrackTabEventArgs> TrackTabPressed;
     public event EventHandler TrackNameCandidatesPressed;
+    public event EventHandler<OffsetStepEventArgs> OffsetStepPressed;
+
+    private bool HandleOffsetStep(Keys keyData)
+    {
+        Keys keyCode = keyData & Keys.KeyCode;
+        bool isCtrlArrow = (keyData & Keys.Control) == Keys.Control && (keyData & Keys.Alt) != Keys.Alt && (keyCode == Keys.Up || keyCode == Keys.Down);
+        if (!isCtrlArrow)
+        {
+            return false;
+        }
+
+        EventHandler<OffsetStepEventArgs> handler = OffsetStepPressed;
+        if (handler != null)
+        {
+            handler(this, new OffsetStepEventArgs(keyCode == Keys.Up ? 1 : -1, (keyData & Keys.Shift) == Keys.Shift));
+        }
+        return true;
+    }
 
     private bool HandleTrackTab(Keys keyData)
     {
@@ -2574,6 +2841,10 @@ public class TrackNameDataGridView : DataGridView
 
     protected override bool ProcessDialogKey(Keys keyData)
     {
+        if (HandleOffsetStep(keyData))
+        {
+            return true;
+        }
         if (HandleTrackNameCandidates(keyData))
         {
             return true;
@@ -2587,6 +2858,10 @@ public class TrackNameDataGridView : DataGridView
 
     protected override bool ProcessDataGridViewKey(KeyEventArgs e)
     {
+        if (HandleOffsetStep(e.KeyData))
+        {
+            return true;
+        }
         if ((e.Alt && (e.KeyCode == Keys.Down || e.KeyCode == Keys.Up)) || e.KeyCode == Keys.F4)
         {
             EventHandler handler = TrackNameCandidatesPressed;
