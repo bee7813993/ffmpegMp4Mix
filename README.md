@@ -114,7 +114,14 @@ Example:
 2. Choose **Right click → Send To → mixtrack_ffmpeg_gui**.
 3. The track list is shown.
 4. Edit track names, order, and output path as needed.
-5. Press **OK** to run `ffmpeg`.
+5. Press **保存** (save) to run `ffmpeg` and create the output file.
+6. Press **閉じる** (close) when you are done.
+
+**保存** does not close the window, so you can adjust offsets or other settings and save again as many times as you like.
+
+- When saving finishes, "保存しました" (saved) is shown at the bottom of the window.
+- Re-saving to a file already saved from the same window skips the overwrite confirmation.
+- Saving may fail while the output file is open in a player. Close it in the player and save again.
 
 When launched from Send To, the received file order is used as the initial track order. In the GUI, you can reorder tracks before running.
 
@@ -184,7 +191,7 @@ Press **自動調整** (auto-adjust) to compare each track with the video's audi
 
 ### Keyboard Workflow
 
-The GUI is arranged so you can proceed with `Tab`, text input, and `Enter` after launch.
+The GUI is arranged so you can get to saving with `Tab`, text input, and `Enter` after launch. Press `Esc` to close the window.
 
 ## CLI Usage
 

@@ -20,6 +20,7 @@ $Script:Settings = $null
 $Script:VideoFile = $null
 $Script:AudioFiles = @()
 $Script:DefaultOutputPath = $null
+$Script:SavedOutputPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 
 function New-DefaultSettings {
     [PSCustomObject]@{
@@ -678,17 +679,6 @@ function Show-ErrorMessage {
         'ffmpegMp4Mix GUI',
         [System.Windows.Forms.MessageBoxButtons]::OK,
         [System.Windows.Forms.MessageBoxIcon]::Error
-    ) | Out-Null
-}
-
-function Show-InfoMessage {
-    param([string]$Message)
-
-    [System.Windows.Forms.MessageBox]::Show(
-        $Message,
-        'ffmpegMp4Mix GUI',
-        [System.Windows.Forms.MessageBoxButtons]::OK,
-        [System.Windows.Forms.MessageBoxIcon]::Information
     ) | Out-Null
 }
 
@@ -1415,7 +1405,11 @@ function Invoke-Ffmpeg {
     }
 
     $arguments = @(Build-FfmpegArguments -TrackItems $TrackItems -OutputPath $OutputPath -Settings $Script:Settings)
-    if (Test-Path -LiteralPath $OutputPath) {
+    $fullOutputPath = [System.IO.Path]::GetFullPath($OutputPath)
+    if ((Test-Path -LiteralPath $OutputPath) -and $Script:SavedOutputPaths.Contains($fullOutputPath)) {
+        $arguments = @('-y') + $arguments
+    }
+    elseif (Test-Path -LiteralPath $OutputPath) {
         $answer = [System.Windows.Forms.MessageBox]::Show(
             "出力ファイルはすでに存在します。上書きしますか？`r`n`r`n$OutputPath",
             'ffmpegMp4Mix GUI',
@@ -1448,9 +1442,14 @@ function Invoke-Ffmpeg {
         $logPath = [System.IO.Path]::ChangeExtension($OutputPath, '.ffmpeg.log')
         $logText = (Get-CommandLine -FileName $ffmpegPath -Arguments $arguments) + "`r`n`r`n" + $stderr
         [System.IO.File]::WriteAllText($logPath, $logText, [System.Text.Encoding]::UTF8)
-        throw "ffmpeg がエラー終了しました。ログを保存しました。`r`n`r`n$logPath"
+        $message = "ffmpeg がエラー終了しました。ログを保存しました。`r`n`r`n$logPath"
+        if ($stderr -match 'Error opening output') {
+            $message += "`r`n`r`n出力ファイルがプレイヤーなどで開かれている可能性があります。閉じてから保存し直してください。"
+        }
+        throw $message
     }
 
+    [void]$Script:SavedOutputPaths.Add($fullOutputPath)
     return $true
 }
 
@@ -1952,7 +1951,7 @@ function Show-MainForm {
     Set-LabelTheme -Label $statusLabel -Muted
 
     $okButton = New-Object System.Windows.Forms.Button
-    $okButton.Text = 'OK'
+    $okButton.Text = '保存'
     $okButton.Location = New-Object System.Drawing.Point(656, 484)
     $okButton.Size = New-Object System.Drawing.Size(92, 30)
     $okButton.Anchor = 'Right,Bottom'
@@ -1960,7 +1959,7 @@ function Show-MainForm {
     Set-ButtonTheme -Button $okButton -Kind Primary
 
     $cancelButton = New-Object System.Windows.Forms.Button
-    $cancelButton.Text = 'キャンセル'
+    $cancelButton.Text = '閉じる'
     $cancelButton.Location = New-Object System.Drawing.Point(756, 484)
     $cancelButton.Size = New-Object System.Drawing.Size(92, 30)
     $cancelButton.Anchor = 'Right,Bottom'
@@ -2915,15 +2914,13 @@ function Show-MainForm {
                 return
             }
 
-            $statusLabel.Text = 'ffmpeg 実行中...'
+            $statusLabel.Text = '保存中...'
             $form.UseWaitCursor = $true
             $form.Refresh()
 
             $ran = Invoke-Ffmpeg -OutputPath $outputPath -TrackItems $trackItems
             if ($ran) {
-                $statusLabel.Text = '完了'
-                Show-InfoMessage "出力が完了しました。`r`n`r`n$outputPath"
-                $form.Close()
+                $statusLabel.Text = '保存しました: {0}（{1}）' -f [System.IO.Path]::GetFileName($outputPath), (Get-Date -Format 'HH:mm:ss')
             }
             else {
                 $statusLabel.Text = ''
