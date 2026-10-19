@@ -1,6 +1,7 @@
 tools/ffmpeg.exe
 tools/ffplay.exe
 tools/ffprobe.exe
+tools/bsroformer/
 dist/
 build/
 tools/ffmpeg-licenses/

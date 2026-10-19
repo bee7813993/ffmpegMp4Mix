@@ -42,6 +42,39 @@ $Script:DefaultOutputPath = $null
 $Script:SavedOutputPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 $Script:AutoOffsetReference = $null
 
+# ボーカル分離に使う BSRoformer.cpp（Vulkan 版。GPU がなければ CPU で動く）。版を上げるときは URL と SHA256 を一緒に変えます。
+$Script:BsRoformerUrl = 'https://github.com/chenmozhijin/BSRoformer.cpp/releases/download/v0.1.0/BSRoformer-windows-vulkan.zip'
+$Script:BsRoformerSha256 = 'a47653911eb17f68e65bce15aed6c4f1bd277a5fbd48293c4e54f0b005b869a7'
+$Script:BsRoformerSizeText = '約22MB'
+# 分離モデル（GGUF）。Role は vocals（ボーカル全体を推定）か lead（リードボーカルだけを推定）。
+# 置き場は %LOCALAPPDATA%\PitaTrack\models。初めて使うときにダウンロードする。
+# 配布できるのはライセンスが明確な Kim（MIT）と anvuew（GPL-3.0）だけなので一覧はこの 2 つ。
+# 他のモデルは自分で変換して同じフォルダーに置けば候補に出る（dev/vocal-separation/README.md）。
+# 一覧にない .gguf も同じフォルダーに置けば候補に出る（名前に karaoke / kara / lead があれば lead 扱い）。
+# 版を上げるときは URL と SHA256 を一緒に変えます。
+$Script:SeparationModelsReleaseUrl = 'https://github.com/bee7813993/ffmpegMp4Mix/releases/download/separation-models-20261019/'
+$Script:SeparationModels = @(
+    [PSCustomObject]@{
+        Key = 'kim'; Role = 'vocals'; FileName = 'kim_mel_vocals-Q8_0.gguf'; Label = 'Kim Mel-Roformer'; Short = 'Kim'
+        Url = $Script:SeparationModelsReleaseUrl + 'kim_mel_vocals-Q8_0.gguf'; Sha256 = 'd659c1d839cccf47941a804c4ccd42b36f4b59b9f035cf7e36e22d323f787aa6'; SizeText = '約240MB'
+        LicenseUrl = $Script:SeparationModelsReleaseUrl + 'kim_mel_vocals-Q8_0.LICENSE.txt'; License = 'MIT'; Author = 'Kimberley Jensen'; Source = 'https://huggingface.co/KimberleyJSN/melbandroformer'
+    }
+    [PSCustomObject]@{
+        Key = 'anvuew'; Role = 'lead'; FileName = 'karaoke_anvuew-Q8_0.gguf'; Label = 'BS-Roformer Karaoke anvuew'; Short = 'anvuew'
+        Url = $Script:SeparationModelsReleaseUrl + 'karaoke_anvuew-Q8_0.gguf'; Sha256 = '58c6d3322f039ca89ddf562d88a561e4102a9bdf53cb647e0c236c5b50bc710f'; SizeText = '約53MB'
+        LicenseUrl = $Script:SeparationModelsReleaseUrl + 'karaoke_anvuew-Q8_0.LICENSE.txt'; License = 'GPL-3.0'; Author = 'anvuew'; Source = 'https://huggingface.co/anvuew/karaoke_bs_roformer'
+    }
+)
+# 分離トラックの初期名。{model} はモデルの短い名前、{db} はリデュース量（-8 / +6）に置き換わる
+$Script:SeparationDefaultTrackNames = [PSCustomObject]@{
+    Cut     = 'オフボーカル'
+    Reduce  = 'ボーカル {db}dB'
+    Karaoke = 'コーラス入りオフボーカル'
+    Vocals  = 'ボーカルのみ'
+}
+$Script:SeparationDefaultVocalModel = 'kim'
+$Script:SeparationDefaultLeadModel = 'anvuew'
+
 function New-DefaultSettings {
     [PSCustomObject]@{
         TrackNames          = [PSCustomObject]@{
@@ -394,7 +427,8 @@ function ConvertTo-SavedSettings {
         [string]$ReencodeBitrate = '256k',
         [object]$OffsetStepMs = 100,
         [object]$AutoOffsetAlways = $false,
-        [object]$TrackCountProfiles = $null
+        [object]$TrackCountProfiles = $null,
+        [object]$Separation = $null
     )
 
     $orderedNames = [ordered]@{}
@@ -425,6 +459,7 @@ function ConvertTo-SavedSettings {
         ReencodeBitrate     = ConvertTo-ReencodeBitrate $ReencodeBitrate
         OffsetStepMs        = ConvertTo-OffsetStepMs $OffsetStepMs
         AutoOffsetAlways    = ConvertTo-SettingFlag $AutoOffsetAlways
+        Separation          = ConvertTo-SeparationSettings $Separation
     }
 }
 
@@ -494,6 +529,7 @@ function Read-Settings {
         OffsetStepMs    = $settings.OffsetStepMs
         AutoOffsetAlways = $settings.AutoOffsetAlways
         TrackCountProfiles = $settings.TrackCountProfiles
+        Separation      = $settings.Separation
     }
     if ($null -ne $settings.PSObject.Properties['TrackNameCandidates']) {
         $convertParams.TrackNameCandidates = @(Get-TrackNameCandidates -Settings $settings)
@@ -1096,6 +1132,14 @@ function Set-CheckBoxTheme {
     $CheckBox.ForeColor = Get-UiColor 'Text'
 }
 
+function Set-RadioButtonTheme {
+    param([System.Windows.Forms.RadioButton]$RadioButton)
+
+    $RadioButton.Font = New-UiFont 9
+    $RadioButton.BackColor = Get-UiColor 'Background'
+    $RadioButton.ForeColor = Get-UiColor 'Text'
+}
+
 function Set-ComboBoxTheme {
     param([System.Windows.Forms.ComboBox]$ComboBox)
 
@@ -1323,11 +1367,20 @@ function Set-TrackNameCandidateColumnItems {
 function Add-TrackRow {
     param(
         [System.Windows.Forms.DataGridView]$Grid,
-        [object]$Item
+        [object]$Item,
+        [int]$Index = -1
     )
 
     Add-TrackNameCandidateToGrid -Grid $Grid -Name ([string]$Item.Title)
-    $rowIndex = $Grid.Rows.Add('', $Item.Title, (Format-OffsetMs ([int]$Item.OffsetMs)), (Get-TrackTypeText $Item), (Get-TrackSourceText $Item))
+    $values = @('', $Item.Title, (Format-OffsetMs ([int]$Item.OffsetMs)), (Get-TrackTypeText $Item), (Get-TrackSourceText $Item))
+    if ($Index -lt 0 -or $Index -ge $Grid.Rows.Count) {
+        $rowIndex = $Grid.Rows.Add($values)
+    }
+    else {
+        # 指定した位置に差し込む（分離で作ったトラックを元のトラックの下に置くため）
+        $Grid.Rows.Insert($Index, $values)
+        $rowIndex = $Index
+    }
     $Grid.Rows[$rowIndex].Cells[4].ToolTipText = [string]$Item.SourceFile
     $Grid.Rows[$rowIndex].Tag = $Item
     Set-OffsetCellNote -Row $Grid.Rows[$rowIndex] -Note ([string]$Item.OffsetNote) -NoteLevel ([string]$Item.OffsetNoteLevel)
@@ -1741,6 +1794,2092 @@ function Invoke-Ffmpeg {
     return $true
 }
 
+# ---- ボーカル分離 ----
+# BSRoformer.cpp の bs_roformer-cli を ffmpeg と同じく外部プロセスとして呼び、推定したステム
+# （ボーカル / リードボーカル）と元音源の差分から、オフボーカルなどの派生トラックを作る。
+
+function Get-BsRoformerDir {
+    return Join-Path $Script:ToolDir 'bsroformer'
+}
+
+function Get-BsRoformerCliPath {
+    return Join-Path (Get-BsRoformerDir) 'bs_roformer-cli.exe'
+}
+
+# モデル（GGUF）の置き場。インストール先が読み取り専用（Store 版）でも使えるようにユーザーのフォルダーに置く。
+# 自分で探してきたモデルもここに置けば一覧に出る
+function Get-SeparationModelsDir {
+    return Join-Path $env:LOCALAPPDATA 'PitaTrack\models'
+}
+
+# モデルと同名の .json があれば表示名などを読む。
+# 書式: {"label": "表示名", "short": "トラック名に使う短い名前", "role": "vocals か lead", "stem": 0}
+# stem は、複数のステムを出すモデルで、ボーカル（リード）がどの番号か（省略時 0）
+function Read-SeparationModelSidecar {
+    param([string]$GgufPath)
+
+    $jsonPath = [System.IO.Path]::ChangeExtension($GgufPath, '.json')
+    if (-not (Test-Path -LiteralPath $jsonPath -PathType Leaf)) {
+        return $null
+    }
+    try {
+        $data = Get-Content -LiteralPath $jsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    }
+    catch {
+        return $null
+    }
+    if ($null -eq $data) {
+        return $null
+    }
+
+    $result = @{}
+    foreach ($name in 'label', 'short', 'role', 'stem') {
+        $property = @($data.PSObject.Properties | Where-Object { $_.Name -ieq $name }) | Select-Object -First 1
+        if ($null -ne $property -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)) {
+            $result[$name] = ([string]$property.Value).Trim()
+        }
+    }
+    if ($result.ContainsKey('stem')) {
+        $stemIndex = 0
+        if ([int]::TryParse($result['stem'], [ref]$stemIndex) -and $stemIndex -ge 0) {
+            $result['stem'] = $stemIndex
+        }
+        else {
+            $result.Remove('stem')
+        }
+    }
+    if ($result.ContainsKey('role')) {
+        $result['role'] = $result['role'].ToLowerInvariant()
+        if ($result['role'] -ne 'vocals' -and $result['role'] -ne 'lead') {
+            $result.Remove('role')
+        }
+    }
+    return $result
+}
+
+# 登録済みのモデルに、モデルフォルダーにある未登録の .gguf を足した一覧。Available はファイルがあるか。
+# 同名の .json があれば表示名・短い名前・用途を上書きする
+function Get-SeparationModelList {
+    $modelsDir = Get-SeparationModelsDir
+    $list = New-Object System.Collections.ArrayList
+    $knownFiles = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($model in $Script:SeparationModels) {
+        $path = Join-Path $modelsDir $model.FileName
+        $label = [string]$model.Label
+        $short = [string]$model.Short
+        $role = [string]$model.Role
+        $stem = 0
+        $sidecar = Read-SeparationModelSidecar -GgufPath $path
+        if ($null -ne $sidecar) {
+            if ($sidecar.ContainsKey('label')) { $label = $sidecar['label'] }
+            if ($sidecar.ContainsKey('short')) { $short = $sidecar['short'] }
+            if ($sidecar.ContainsKey('role')) { $role = $sidecar['role'] }
+            if ($sidecar.ContainsKey('stem')) { $stem = [int]$sidecar['stem'] }
+        }
+        [void]$list.Add([PSCustomObject]@{
+            Key         = [string]$model.Key
+            Role        = $role
+            FileName    = [string]$model.FileName
+            Label       = $label
+            Short       = $short
+            Recommended = $false
+            Path        = $path
+            Available   = (Test-Path -LiteralPath $path -PathType Leaf)
+            Stem        = $stem
+            Url         = [string]$model.Url
+            Sha256      = [string]$model.Sha256
+            SizeText    = [string]$model.SizeText
+            LicenseUrl  = [string]$model.LicenseUrl
+            License     = [string]$model.License
+            Author      = [string]$model.Author
+            Source      = [string]$model.Source
+        })
+        [void]$knownFiles.Add([string]$model.FileName)
+    }
+
+    if (Test-Path -LiteralPath $modelsDir -PathType Container) {
+        foreach ($file in @(Get-ChildItem -LiteralPath $modelsDir -Filter '*.gguf' -File | Sort-Object Name)) {
+            if ($knownFiles.Contains($file.Name)) {
+                continue
+            }
+            $label = $file.BaseName
+            $short = $file.BaseName
+            $role = if ($file.BaseName -match 'karaoke|kara|lead') { 'lead' } else { 'vocals' }
+            $stem = 0
+            # ファイル名に付いた量子化の印（-Q8_0 など）と先頭の karaoke_ はキー（ファイル名の接尾辞に使う）から外す
+            $key = $file.BaseName -replace '[-_](q\d_\d|f16|fp16|f32|fp32)$', '' -replace '^(karaoke|kara)[-_]', ''
+            if ([string]::IsNullOrWhiteSpace($key) -or @($list | Where-Object { $_.Key -eq $key }).Count -gt 0) {
+                $key = $file.BaseName
+            }
+            $sidecar = Read-SeparationModelSidecar -GgufPath $file.FullName
+            if ($null -ne $sidecar) {
+                if ($sidecar.ContainsKey('label')) { $label = $sidecar['label'] }
+                if ($sidecar.ContainsKey('short')) { $short = $sidecar['short'] }
+                elseif ($sidecar.ContainsKey('label')) { $short = $sidecar['label'] }
+                if ($sidecar.ContainsKey('role')) { $role = $sidecar['role'] }
+                if ($sidecar.ContainsKey('stem')) { $stem = [int]$sidecar['stem'] }
+            }
+            [void]$list.Add([PSCustomObject]@{
+                Key         = $key
+                Role        = $role
+                FileName    = $file.Name
+                Label       = $label
+                Short       = $short
+                Recommended = $false
+                Path        = $file.FullName
+                Available   = $true
+                Stem        = $stem
+                Url         = ''
+                Sha256      = ''
+                SizeText    = ''
+                LicenseUrl  = ''
+                License     = ''
+                Author      = ''
+                Source      = ''
+            })
+        }
+    }
+
+    return @($list.ToArray())
+}
+
+function Get-SeparationModel {
+    param(
+        [object[]]$Models,
+        [string]$Key
+    )
+
+    foreach ($model in $Models) {
+        if ($model.Key -eq $Key) {
+            return $model
+        }
+    }
+    throw "分離モデルの定義がありません: $Key"
+}
+
+# 分離に関する設定（選んだモデルなど）。古い設定ファイルには項目がないので既定値で補う。
+# 「全モデルで候補を作る」は一回限りの操作なので覚えない
+function ConvertTo-SeparationSettings {
+    param([object]$Value)
+
+    $vocalModel = $Script:SeparationDefaultVocalModel
+    $leadModel = $Script:SeparationDefaultLeadModel
+    $reduceDb = 8
+    $twoStage = $true
+    $trackNames = [ordered]@{}
+    foreach ($property in $Script:SeparationDefaultTrackNames.PSObject.Properties) {
+        $trackNames[$property.Name] = [string]$property.Value
+    }
+    if ($null -ne $Value) {
+        $savedNames = $Value.TrackNames
+        if ($null -ne $savedNames) {
+            foreach ($name in @($trackNames.Keys)) {
+                $candidate = [string]$savedNames.$name
+                if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+                    $trackNames[$name] = $candidate.Trim()
+                }
+            }
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$Value.VocalModel)) {
+            $vocalModel = ([string]$Value.VocalModel).Trim()
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$Value.LeadModel)) {
+            $leadModel = ([string]$Value.LeadModel).Trim()
+        }
+        $parsedDb = 0
+        if ([int]::TryParse(([string]$Value.ReduceDb).Trim(), [ref]$parsedDb) -and $parsedDb -ge -20 -and $parsedDb -le 40) {
+            $reduceDb = $parsedDb
+        }
+        if ($null -ne $Value.TwoStage) {
+            $twoStage = ConvertTo-SettingFlag $Value.TwoStage
+        }
+    }
+
+    [PSCustomObject]@{
+        VocalModel = $vocalModel
+        LeadModel  = $leadModel
+        ReduceDb   = $reduceDb
+        TwoStage   = $twoStage
+        TrackNames = [PSCustomObject]$trackNames
+    }
+}
+
+# 初期名のひな形を実際の名前にする。{model} はモデルの短い名前、{db} はリデュース量（下げる 8 → -8、上げる 6 → +6）。
+# IncludeModel（候補をまとめて作るとき）でひな形に {model} がなければ、名前の後ろに（モデル名）を付ける
+function Expand-SeparationTitleTemplate {
+    param(
+        [string]$Template,
+        [string]$ModelShort,
+        [object]$Db,
+        [bool]$IncludeModel,
+        [string[]]$ExtraNotes
+    )
+
+    $dbText = ''
+    if ($null -ne $Db) {
+        $value = [int]$Db
+        $dbText = if ($value -gt 0) { '-' + $value } elseif ($value -lt 0) { '+' + (-$value) } else { '±0' }
+    }
+    $title = ([string]$Template).Replace('{model}', $ModelShort).Replace('{db}', $dbText).Trim()
+    $notes = @()
+    if ($IncludeModel -and ([string]$Template) -notmatch '\{model\}') {
+        $notes += $ModelShort
+    }
+    $notes += @($ExtraNotes)
+    return Format-SeparationTitle -Base $title -Notes $notes
+}
+
+function Read-SharedTextFile {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return ''
+    }
+
+    # 書き込み中のファイルも読めるように共有モードで開く
+    $stream = New-Object System.IO.FileStream -ArgumentList $Path, ([System.IO.FileMode]::Open), ([System.IO.FileAccess]::Read), ([System.IO.FileShare]::ReadWrite)
+    try {
+        $reader = New-Object System.IO.StreamReader -ArgumentList $stream, ([System.Text.Encoding]::UTF8)
+        try {
+            return $reader.ReadToEnd()
+        }
+        finally {
+            $reader.Dispose()
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
+# 外部プロセスを隠しウィンドウで実行し、終わるまで画面を更新しながら待つ。
+# 標準出力は途中経過として OnOutput に渡す（bs_roformer-cli の進捗表示用）。
+function Invoke-SeparationProcess {
+    param(
+        [string]$FilePath,
+        [string[]]$Arguments,
+        [scriptblock]$OnOutput = $null,
+        [object]$State = $null
+    )
+
+    $tempBase = Join-Path ([System.IO.Path]::GetTempPath()) ('PitaTrack_proc_' + [guid]::NewGuid().ToString('N'))
+    $stdoutPath = $tempBase + '.out.log'
+    $stderrPath = $tempBase + '.err.log'
+    $argumentLine = ($Arguments | ForEach-Object { ConvertTo-CommandLineArgument $_ }) -join ' '
+    $process = Start-Process -FilePath $FilePath -ArgumentList $argumentLine -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+    try {
+        # 終了前にハンドルを掴んでおかないと ExitCode が取れない（Start-Process の仕様）
+        $null = $process.Handle
+        while (-not $process.HasExited) {
+            Start-Sleep -Milliseconds 200
+            [System.Windows.Forms.Application]::DoEvents()
+            if ($null -ne $State -and $State.CancelRequested) {
+                try {
+                    $process.Kill()
+                }
+                catch {
+                }
+                $process.WaitForExit()
+                throw '中止しました。'
+            }
+            if ($null -ne $OnOutput) {
+                & $OnOutput (Read-SharedTextFile $stdoutPath)
+            }
+        }
+        $process.WaitForExit()
+
+        return [PSCustomObject]@{
+            ExitCode = $process.ExitCode
+            StdOut   = Read-SharedTextFile $stdoutPath
+            StdErr   = Read-SharedTextFile $stderrPath
+            Command  = Get-CommandLine -FileName $FilePath -Arguments $Arguments
+        }
+    }
+    finally {
+        $process.Dispose()
+        foreach ($path in @($stdoutPath, $stderrPath)) {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Assert-SeparationProcessSucceeded {
+    param(
+        [object]$Result,
+        [string]$What,
+        [string]$LogPath
+    )
+
+    if ($Result.ExitCode -eq 0) {
+        return
+    }
+
+    $logText = $Result.Command + "`r`n`r`n" + $Result.StdOut + "`r`n" + $Result.StdErr
+    [System.IO.File]::WriteAllText($LogPath, $logText, [System.Text.Encoding]::UTF8)
+    $lastLine = @(($Result.StdErr -split "`r?`n") | Where-Object { $_ -match '\S' } | Select-Object -Last 1)
+    throw ("{0} がエラー終了しました（終了コード {1}）。ログを保存しました。`r`n`r`n{2}`r`n`r`n{3}" -f $What, $Result.ExitCode, $LogPath, ($lastLine -join ''))
+}
+
+function Save-SeparationDownload {
+    param(
+        [string]$Url,
+        [string]$Destination,
+        [scriptblock]$OnPercent,
+        [object]$State
+    )
+
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
+    $request = [System.Net.WebRequest]::Create($Url)
+    $request.UserAgent = 'PitaTrack'
+    $request.Timeout = 30000
+    $request.ReadWriteTimeout = 60000
+    if ($null -ne $request.Proxy) {
+        $request.Proxy.Credentials = [System.Net.CredentialCache]::DefaultCredentials
+    }
+
+    $response = $request.GetResponse()
+    try {
+        $stream = $response.GetResponseStream()
+        $file = [System.IO.File]::Create($Destination)
+        try {
+            $total = $response.ContentLength
+            $buffer = New-Object byte[] 65536
+            $done = [long]0
+            while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                $file.Write($buffer, 0, $read)
+                $done += $read
+                if ($total -gt 0) {
+                    & $OnPercent ([int](100 * $done / $total))
+                }
+                [System.Windows.Forms.Application]::DoEvents()
+                if ($null -ne $State -and $State.CancelRequested) {
+                    throw '中止しました。'
+                }
+            }
+        }
+        finally {
+            $file.Dispose()
+            $stream.Dispose()
+        }
+    }
+    finally {
+        $response.Close()
+    }
+}
+
+# BSRoformer.cpp の zip をダウンロードして SHA256 を確かめ、exe と dll を tools\bsroformer に置く
+function Install-BsRoformer {
+    param(
+        [scriptblock]$OnProgress,
+        [object]$State
+    )
+
+    $targetDir = Get-BsRoformerDir
+    $zipPath = Join-Path ([System.IO.Path]::GetTempPath()) ('PitaTrack_bsroformer_' + [guid]::NewGuid().ToString('N') + '.zip')
+    $extractDir = $zipPath + '.dir'
+    try {
+        $onPercent = {
+            param([int]$percent)
+            & $OnProgress $percent ('BSRoformer.cpp をダウンロードしています... {0}%' -f $percent)
+        }
+        & $OnProgress 0 'BSRoformer.cpp をダウンロードしています...'
+        Save-SeparationDownload -Url $Script:BsRoformerUrl -Destination $zipPath -OnPercent $onPercent -State $State
+
+        & $OnProgress 100 'ダウンロードしたファイルを確認しています...'
+        $hash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash
+        if ($hash -ne $Script:BsRoformerSha256) {
+            throw 'ダウンロードしたファイルが正しくありません（SHA256 が一致しません）。'
+        }
+
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractDir)
+        if (-not (Test-Path -LiteralPath $targetDir)) {
+            New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+        }
+        foreach ($file in @(Get-ChildItem -LiteralPath $extractDir -Recurse -File | Where-Object { $_.Extension -eq '.exe' -or $_.Extension -eq '.dll' })) {
+            Move-Item -LiteralPath $file.FullName -Destination (Join-Path $targetDir $file.Name) -Force
+        }
+        if (-not (Test-Path -LiteralPath (Get-BsRoformerCliPath) -PathType Leaf)) {
+            throw 'ダウンロードしたファイルに bs_roformer-cli.exe が入っていません。'
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# bs_roformer-cli.exe がなければダウンロードするか尋ねる。断られたら $null
+function Request-BsRoformer {
+    param(
+        [System.Windows.Forms.IWin32Window]$Owner,
+        [scriptblock]$OnProgress,
+        [object]$State
+    )
+
+    $cliPath = Get-BsRoformerCliPath
+    if (Test-Path -LiteralPath $cliPath -PathType Leaf) {
+        return $cliPath
+    }
+
+    $message = "ボーカル分離には BSRoformer.cpp（{0}）が必要です。ダウンロードしますか？`r`n`r`n{1}`r`n→ {2}" -f $Script:BsRoformerSizeText, $Script:BsRoformerUrl, (Get-BsRoformerDir)
+    $answer = [System.Windows.Forms.MessageBox]::Show(
+        $Owner,
+        $message,
+        'ぴたトラック',
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Question
+    )
+    if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) {
+        return $null
+    }
+
+    Install-BsRoformer -OnProgress $OnProgress -State $State
+    return $cliPath
+}
+
+# モデルの GGUF をダウンロードして SHA256 を確かめ、モデルフォルダーに置く（ライセンス文も隣に置く）
+function Install-SeparationModel {
+    param(
+        [object]$Model,
+        [scriptblock]$OnProgress,
+        [object]$State
+    )
+
+    $modelsDir = Get-SeparationModelsDir
+    if (-not (Test-Path -LiteralPath $modelsDir -PathType Container)) {
+        New-Item -ItemType Directory -Path $modelsDir -Force | Out-Null
+    }
+    $partPath = [string]$Model.Path + '.part'
+    try {
+        $onPercent = {
+            param([int]$percent)
+            & $OnProgress $percent ('{0} をダウンロードしています... {1}%' -f $Model.Label, $percent)
+        }
+        & $OnProgress 0 ('{0} をダウンロードしています...' -f $Model.Label)
+        Save-SeparationDownload -Url ([string]$Model.Url) -Destination $partPath -OnPercent $onPercent -State $State
+
+        & $OnProgress 100 'ダウンロードしたファイルを確認しています...'
+        $hash = (Get-FileHash -LiteralPath $partPath -Algorithm SHA256).Hash
+        if ($hash -ne [string]$Model.Sha256) {
+            throw 'ダウンロードしたファイルが正しくありません（SHA256 が一致しません）。'
+        }
+        Move-Item -LiteralPath $partPath -Destination ([string]$Model.Path) -Force
+
+        if (-not [string]::IsNullOrWhiteSpace([string]$Model.LicenseUrl)) {
+            try {
+                Save-SeparationDownload -Url ([string]$Model.LicenseUrl) -Destination ([System.IO.Path]::ChangeExtension([string]$Model.Path, '.LICENSE.txt')) -OnPercent { param([int]$percent) } -State $State
+            }
+            catch {
+            }
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# モデルがなければダウンロードするか尋ねてから取得する。ダウンロードできないモデルは置き場を案内して止める。
+# 断られたら $false
+function Request-SeparationModel {
+    param(
+        [object]$Model,
+        [System.Windows.Forms.IWin32Window]$Owner,
+        [scriptblock]$OnProgress,
+        [object]$State
+    )
+
+    if (Test-Path -LiteralPath ([string]$Model.Path) -PathType Leaf) {
+        return $true
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$Model.Url)) {
+        throw ("分離モデルがありません。`r`n{0}`r`n`r`n{1} の GGUF ファイルをこの場所に置いてください。" -f $Model.Path, $Model.Label)
+    }
+
+    $message = "モデル「{0}」（{1}）がまだありません。ダウンロードしますか？`r`n`r`n作者: {2}`r`nライセンス: {3}`r`n元のモデル: {4}`r`n`r`n{5}`r`n→ {6}" -f $Model.Label, $Model.SizeText, $Model.Author, $Model.License, $Model.Source, $Model.Url, (Get-SeparationModelsDir)
+    $answer = [System.Windows.Forms.MessageBox]::Show(
+        $Owner,
+        $message,
+        'ぴたトラック',
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Question
+    )
+    if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) {
+        return $false
+    }
+
+    Install-SeparationModel -Model $Model -OnProgress $OnProgress -State $State
+    return $true
+}
+
+# bs_roformer-cli は 44.1 kHz の WAV しか受け付けないので、ステレオ 32 bit float に変換する
+function ConvertTo-SeparationWav {
+    param(
+        [string]$FfmpegPath,
+        [string]$SourceFile,
+        [string]$OutputPath,
+        [string]$LogPath,
+        [object]$State
+    )
+
+    $arguments = @('-y', '-v', 'error', '-i', $SourceFile, '-map', '0:a:0', '-vn', '-ac', '2', '-ar', '44100', '-c:a', 'pcm_f32le', $OutputPath)
+    $result = Invoke-SeparationProcess -FilePath $FfmpegPath -Arguments $arguments -State $State
+    Assert-SeparationProcessSucceeded -Result $result -What 'ffmpeg（音声の変換）' -LogPath $LogPath
+}
+
+function Invoke-BsRoformerCli {
+    param(
+        [string]$CliPath,
+        [string]$ModelPath,
+        [string]$InputWav,
+        [string]$OutputWav,
+        [string]$LogPath,
+        [scriptblock]$OnPercent,
+        [object]$State,
+        [int]$StemIndex = 0
+    )
+
+    $progress = [PSCustomObject]@{ LastPercent = -1 }
+    $onOutput = {
+        param([string]$text)
+
+        # 進捗は "[====>   ] 35 %" の形で標準出力に出る。最後の値だけ見る
+        $found = [regex]::Matches($text, '(\d{1,3}) %')
+        if ($found.Count -gt 0) {
+            $percent = [int]$found[$found.Count - 1].Groups[1].Value
+            if ($percent -ne $progress.LastPercent) {
+                $progress.LastPercent = $percent
+                & $OnPercent $percent
+            }
+        }
+    }
+
+    $result = Invoke-SeparationProcess -FilePath $CliPath -Arguments @($ModelPath, $InputWav, $OutputWav) -OnOutput $onOutput -State $State
+    Assert-SeparationProcessSucceeded -Result $result -What 'bs_roformer-cli（ボーカル分離）' -LogPath $LogPath
+    if (-not (Test-Path -LiteralPath $OutputWav -PathType Leaf)) {
+        # 複数のステムを出すモデルは <名前>_stem_N.wav に分かれて出る。指定の番号を使い、残りは消す
+        $stemBase = [System.IO.Path]::Combine([System.IO.Path]::GetDirectoryName($OutputWav), [System.IO.Path]::GetFileNameWithoutExtension($OutputWav))
+        $wanted = '{0}_stem_{1}.wav' -f $stemBase, $StemIndex
+        if (Test-Path -LiteralPath $wanted -PathType Leaf) {
+            Move-Item -LiteralPath $wanted -Destination $OutputWav -Force
+            Get-ChildItem -LiteralPath ([System.IO.Path]::GetDirectoryName($OutputWav)) -Filter ([System.IO.Path]::GetFileName($stemBase) + '_stem_*.wav') -File | Remove-Item -Force -ErrorAction SilentlyContinue
+        }
+    }
+    if (-not (Test-Path -LiteralPath $OutputWav -PathType Leaf)) {
+        throw 'bs_roformer-cli が出力ファイルを作りませんでした。'
+    }
+}
+
+# 分離したトラックは元音源より大きなピークになることがあり、AAC にすると 0 dBFS を超えるので、
+# 書き出す前にピークだけ抑える（latency=true で遅れを補正し、元音源とのタイミングを保つ）
+$Script:SeparationLimiterFilter = 'alimiter=limit=0.98:level=false:latency=true'
+
+# リデュース量 dB に対する元音源とステムの係数。出力 = MixGain × 元音源 + StemGain × ステム。
+# 正（下げる）: 元音源 − (1 − 10^(−dB/20)) × ボーカル。
+# 負（強調）: ボーカルを足すとピークが 0 dBFS を超えてリミッターが効きすぎるので、代わりに伴奏側を下げる
+# （10^(dB/20) × 元音源 + (1 − 10^(dB/20)) × ボーカル。バランスは同じで全体は小さくなる）
+function Get-SeparationReduceGains {
+    param([int]$Db)
+
+    if ($Db -ge 0) {
+        return @(1.0, -(1.0 - [math]::Pow(10.0, -$Db / 20.0)))
+    }
+    $mixGain = [math]::Pow(10.0, $Db / 20.0)
+    return @($mixGain, (1.0 - $mixGain))
+}
+
+# MixGain × 元音源 + StemGain × ステム を AAC で書き出す（オフボーカルは 1 と −1）。
+# amix は負の重みを無視するので pan で計算する
+function New-SeparationDerivedTrack {
+    param(
+        [string]$FfmpegPath,
+        [string]$MixWav,
+        [string]$StemWav,
+        [double]$MixGain,
+        [double]$StemGain,
+        [string]$OutputPath,
+        [string]$Bitrate,
+        [string]$LogPath,
+        [object]$State
+    )
+
+    $culture = [System.Globalization.CultureInfo]::InvariantCulture
+    $mixText = $MixGain.ToString('0.######', $culture)
+    $sign = if ($StemGain -lt 0) { '-' } else { '+' }
+    $stemText = [math]::Abs($StemGain).ToString('0.######', $culture)
+    $filter = ('[0:a][1:a]amerge=inputs=2,pan=stereo|c0={0}*c0{1}{2}*c2|c1={0}*c1{1}{2}*c3,' -f $mixText, $sign, $stemText) + $Script:SeparationLimiterFilter
+    $arguments = @('-y', '-v', 'error', '-i', $MixWav, '-i', $StemWav, '-filter_complex', $filter, '-c:a', 'aac', '-b:a', $Bitrate, $OutputPath)
+    $result = Invoke-SeparationProcess -FilePath $FfmpegPath -Arguments $arguments -State $State
+    Assert-SeparationProcessSucceeded -Result $result -What 'ffmpeg（トラックの書き出し）' -LogPath $LogPath
+}
+
+function Export-SeparationStem {
+    param(
+        [string]$FfmpegPath,
+        [string]$StemWav,
+        [string]$OutputPath,
+        [string]$Bitrate,
+        [string]$LogPath,
+        [object]$State
+    )
+
+    $arguments = @('-y', '-v', 'error', '-i', $StemWav, '-af', $Script:SeparationLimiterFilter, '-c:a', 'aac', '-b:a', $Bitrate, $OutputPath)
+    $result = Invoke-SeparationProcess -FilePath $FfmpegPath -Arguments $arguments -State $State
+    Assert-SeparationProcessSucceeded -Result $result -What 'ffmpeg（トラックの書き出し）' -LogPath $LogPath
+}
+
+function Get-SeparationOutputPath {
+    param(
+        [string]$SourceFile,
+        [string]$Suffix
+    )
+
+    $directory = Split-Path -Parent $SourceFile
+    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($SourceFile)
+    return Join-Path $directory ($baseName + $Suffix + '.m4a')
+}
+
+function Format-SeparationTitle {
+    param(
+        [string]$Base,
+        [string[]]$Notes
+    )
+
+    $parts = @($Notes | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($parts.Count -eq 0) {
+        return $Base
+    }
+    return $Base + '（' + ($parts -join ' / ') + '）'
+}
+
+# リデュース量の表記。正でボーカルを下げる、負で上げる（強調）
+function Format-SeparationReduceTitle {
+    param([int]$Db)
+
+    if ($Db -ge 0) {
+        return 'ボーカル -{0}dB' -f $Db
+    }
+    return 'ボーカル +{0}dB' -f (-$Db)
+}
+
+# スライダーの横に出す目安。音量比 10^(−dB/20) を「約25%」「約2.0倍」で表す
+function Format-SeparationLevelNote {
+    param([int]$Db)
+
+    if ($Db -eq 0) {
+        return '（元のまま）'
+    }
+    $ratio = [math]::Pow(10.0, -$Db / 20.0)
+    if ($Db -gt 0) {
+        return '（約{0}%）' -f [math]::Round($ratio * 100)
+    }
+    return '（約{0}倍）' -f $ratio.ToString('0.0', [System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+function Format-SeparationReduceSuffix {
+    param(
+        [int]$Db,
+        [string]$ModelKey
+    )
+
+    if ($Db -ge 0) {
+        return '_vocal-{0}dB_{1}' -f $Db, $ModelKey
+    }
+    return '_vocal+{0}dB_{1}' -f (-$Db), $ModelKey
+}
+
+# 作るトラックの一覧。この順にトラックが追加される。
+# StemId は引くステム（「モデル|入力」）。Factor が $null のものはステムそのまま書き出す。
+# 「候補をまとめて作る」ではボーカルカットとコーラス残しをファイルのある全モデルで作り、トラック名にモデル名を付ける。
+function Get-SeparationKinds {
+    param(
+        [object]$Request,
+        [object[]]$Models
+    )
+
+    $all = [bool]$Request.AllCandidates
+    $vocalKeys = @([string]$Request.VocalModel)
+    $leadKeys = @([string]$Request.LeadModel)
+    if ($all) {
+        $vocalKeys = @($Models | Where-Object { $_.Role -eq 'vocals' -and $_.Available } | ForEach-Object { $_.Key })
+        $leadKeys = @($Models | Where-Object { $_.Role -eq 'lead' -and $_.Available } | ForEach-Object { $_.Key })
+    }
+    $vocalModel = [string]$Request.VocalModel
+    $twoStage = [bool]$Request.TwoStage
+
+    # gains が $null のものはステムをそのまま書き出す
+    $names = $Request.TrackNames
+    if ($null -eq $names) {
+        $names = (ConvertTo-SeparationSettings $null).TrackNames
+    }
+    # $template はひな形、$short はモデルの短い名前、$extra は「2段」などの補足
+    $newKind = {
+        param([string]$key, [string]$stemId, [object]$gains, [string]$suffix, [string]$template, [string]$short, [string[]]$extra, [string]$model, [object]$db, [bool]$hidden)
+        [PSCustomObject]@{
+            Key = $key; StemId = $stemId; Gains = $gains; Suffix = $suffix
+            Title = Expand-SeparationTitleTemplate -Template $template -ModelShort $short -Db $db -IncludeModel $all -ExtraNotes $extra
+            Template = $template; ModelShort = $short; IncludeModel = $all; ExtraNotes = @($extra | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+            VocalModel = $model; Db = $db; Hidden = $hidden
+        }
+    }
+
+    $kinds = @()
+    if ($Request.VocalCut) {
+        foreach ($key in $vocalKeys) {
+            $short = (Get-SeparationModel -Models $Models -Key $key).Short
+            $kinds += & $newKind 'cut' ($key + '|mix') @(1.0, -1.0) ('_offvocal_' + $key) ([string]$names.Cut) $short @() $key $null $false
+        }
+    }
+    if ($Request.VocalReduce) {
+        # 正で下げる、負で上げる（強調）
+        $db = [int]$Request.ReduceDb
+        $short = (Get-SeparationModel -Models $Models -Key $vocalModel).Short
+        $kinds += & $newKind 'reduce' ($vocalModel + '|mix') (Get-SeparationReduceGains -Db $db) (Format-SeparationReduceSuffix -Db $db -ModelKey $vocalModel) ([string]$names.Reduce) $short @() $vocalModel $db $false
+    }
+    if ($Request.Karaoke) {
+        foreach ($key in $leadKeys) {
+            $short = (Get-SeparationModel -Models $Models -Key $key).Short
+            if ($twoStage) {
+                # ボーカルだけを取り出してからリードを推定する。元音源 − リード ＝ ボーカルモデルの伴奏 + コーラス成分
+                $kinds += & $newKind 'karaoke' ($key + '|stem:' + $vocalModel) @(1.0, -1.0) ('_karaoke_' + $key + '_2stage') ([string]$names.Karaoke) $short @($(if ($all) { '2段' })) $vocalModel $null $false
+            }
+            else {
+                $kinds += & $newKind 'karaoke' ($key + '|mix') @(1.0, -1.0) ('_karaoke_' + $key) ([string]$names.Karaoke) $short @() '' $null $false
+            }
+        }
+    }
+    if ($Request.VocalsOnly) {
+        $short = (Get-SeparationModel -Models $Models -Key $vocalModel).Short
+        $kinds += & $newKind 'vocals' ($vocalModel + '|mix') $null ('_vocals_' + $vocalModel) ([string]$names.Vocals) $short @() $vocalModel $null $false
+    }
+    if ($Request.VocalReduce) {
+        # リデュースのプレビュー（伴奏とボーカルを同時に鳴らして量を変える）用に、
+        # 同じモデルの伴奏とボーカルがなければ隠しトラックとして作っておく
+        if (-not @($kinds | Where-Object { $_.Key -eq 'cut' -and $_.VocalModel -eq $vocalModel }).Count) {
+            $kinds += & $newKind 'cut' ($vocalModel + '|mix') @(1.0, -1.0) ('_offvocal_' + $vocalModel) ([string]$names.Cut) $short @() $vocalModel $null $true
+        }
+        if (-not @($kinds | Where-Object { $_.Key -eq 'vocals' -and $_.VocalModel -eq $vocalModel }).Count) {
+            $kinds += & $newKind 'vocals' ($vocalModel + '|mix') $null ('_vocals_' + $vocalModel) ([string]$names.Vocals) $short @() $vocalModel $null $true
+        }
+    }
+    return $kinds
+}
+
+# 必要な bs_roformer-cli の実行一覧（重複なし、依存順）。StemId「モデル|mix」は元音源から、
+# 「モデル|stem:ボーカルモデル」はそのボーカルモデルのステムから推定する
+function Get-SeparationRunPlan {
+    param([object[]]$Kinds)
+
+    $runs = New-Object System.Collections.ArrayList
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($kind in $Kinds) {
+        $modelKey, $inputId = ([string]$kind.StemId) -split '\|', 2
+        if ($inputId -like 'stem:*') {
+            $dependency = $inputId.Substring(5) + '|mix'
+            if ($seen.Add($dependency)) {
+                [void]$runs.Add([PSCustomObject]@{ Id = $dependency; ModelKey = $inputId.Substring(5); InputId = 'mix' })
+            }
+        }
+        if ($seen.Add([string]$kind.StemId)) {
+            [void]$runs.Add([PSCustomObject]@{ Id = [string]$kind.StemId; ModelKey = $modelKey; InputId = $inputId })
+        }
+    }
+    return @($runs.ToArray())
+}
+
+# 変換 → 分離 → 書き出しを順に行い、作ったファイルとトラック名の一覧を返す。
+# OutputDir を指定するとそこに書き出す（採用を決めるまでの一時置き場）。省略時は元の音源と同じフォルダー
+function Invoke-Separation {
+    param(
+        [object]$Request,
+        [string]$FfmpegPath,
+        [string]$CliPath,
+        [scriptblock]$OnProgress,
+        [object]$State,
+        [string]$OutputDir = ''
+    )
+
+    $models = @(Get-SeparationModelList)
+    $kinds = @(Get-SeparationKinds -Request $Request -Models $models)
+    if ($kinds.Count -eq 0) {
+        if ($Request.AllCandidates -and ($Request.VocalCut -or $Request.Karaoke)) {
+            throw ("候補になるモデルがありません。`r`n{0} に GGUF ファイルを置いてください。" -f (Get-SeparationModelsDir))
+        }
+        throw '作るトラックを選んでください。'
+    }
+
+    $runs = @(Get-SeparationRunPlan -Kinds $kinds)
+    foreach ($run in $runs) {
+        $model = Get-SeparationModel -Models $models -Key $run.ModelKey
+        if (-not $model.Available) {
+            throw ("分離モデルがありません。`r`n{0}`r`n`r`n{1} の GGUF ファイルをこの場所に置いてください。" -f $model.Path, $model.Label)
+        }
+    }
+
+    $logPath = [System.IO.Path]::ChangeExtension((Get-SeparationOutputPath -SourceFile $Request.SourceFile -Suffix '_separate'), '.log')
+    # OutputDir があるときは作業用 WAV もその下に残す（リデュース量を変えて作り直すのに使う。呼び出し側が消す）
+    $keepWork = -not [string]::IsNullOrWhiteSpace($OutputDir)
+    $tempDir = if ($keepWork) { Join-Path $OutputDir 'work' } else { Join-Path ([System.IO.Path]::GetTempPath()) ('PitaTrack_sep_' + [guid]::NewGuid().ToString('N')) }
+    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+    try {
+        & $OnProgress 0 '音声を 44.1kHz の WAV に変換しています...'
+        $mixWav = Join-Path $tempDir 'mix.wav'
+        ConvertTo-SeparationWav -FfmpegPath $FfmpegPath -SourceFile $Request.SourceFile -OutputPath $mixWav -LogPath $logPath -State $State
+
+        $stems = @{}
+        $runCount = $runs.Count
+        for ($runIndex = 0; $runIndex -lt $runCount; $runIndex++) {
+            $run = $runs[$runIndex]
+            $model = Get-SeparationModel -Models $models -Key $run.ModelKey
+            $inputWav = if ($run.InputId -eq 'mix') { $mixWav } else { $stems[$run.InputId.Substring(5) + '|mix'] }
+            $stemWav = Join-Path $tempDir ('stem{0}.wav' -f $runIndex)
+            $stemLabel = if ($model.Role -eq 'lead') { 'リードボーカル' } else { 'ボーカル' }
+            $percentBase = 5 + (85 * $runIndex / $runCount)
+            $percentSpan = 85 / $runCount
+            & $OnProgress ([int]$percentBase) ('{0} で{1}を分離しています ({2}/{3})...' -f $model.Short, $stemLabel, ($runIndex + 1), $runCount)
+            $onPercent = {
+                param([int]$percent)
+                & $OnProgress ([int]($percentBase + $percentSpan * $percent / 100)) ('{0} で{1}を分離しています ({2}/{3}) {4}%' -f $model.Short, $stemLabel, ($runIndex + 1), $runCount, $percent)
+            }
+            Invoke-BsRoformerCli -CliPath $CliPath -ModelPath $model.Path -InputWav $inputWav -OutputWav $stemWav -LogPath $logPath -OnPercent $onPercent -State $State -StemIndex ([int]$model.Stem)
+            $stems[$run.Id] = $stemWav
+        }
+
+        & $OnProgress 92 'トラックを書き出しています...'
+        $outputs = @()
+        foreach ($kind in $kinds) {
+            $outputPath = Get-SeparationOutputPath -SourceFile $Request.SourceFile -Suffix $kind.Suffix
+            if (-not [string]::IsNullOrWhiteSpace($OutputDir)) {
+                $outputPath = Join-Path $OutputDir (Split-Path -Leaf $outputPath)
+            }
+            if ($null -eq $kind.Gains) {
+                Export-SeparationStem -FfmpegPath $FfmpegPath -StemWav $stems[$kind.StemId] -OutputPath $outputPath -Bitrate $Request.Bitrate -LogPath $logPath -State $State
+            }
+            else {
+                New-SeparationDerivedTrack -FfmpegPath $FfmpegPath -MixWav $mixWav -StemWav $stems[$kind.StemId] -MixGain ([double]$kind.Gains[0]) -StemGain ([double]$kind.Gains[1]) -OutputPath $outputPath -Bitrate $Request.Bitrate -LogPath $logPath -State $State
+            }
+            $outputs += [PSCustomObject]@{
+                Path = $outputPath; Title = $kind.Title; Kind = $kind.Key; Hidden = [bool]$kind.Hidden
+                VocalModel = [string]$kind.VocalModel; Db = $kind.Db
+                Template = [string]$kind.Template; ModelShort = [string]$kind.ModelShort; IncludeModel = [bool]$kind.IncludeModel; ExtraNotes = @($kind.ExtraNotes)
+                MixWav = $mixWav; StemWav = $stems[$kind.StemId]
+            }
+        }
+
+        & $OnProgress 100 '完了'
+        return $outputs
+    }
+    finally {
+        if (-not $keepWork) {
+            Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+# 分離で作ったファイルを、元のトラックの下にトラック名付きで差し込む。
+# 同じ音源から作ったので、オフセットは元のトラックと同じにする。同じファイルの行がすでにあれば追加しない
+function Add-SeparatedTracksToGrid {
+    param(
+        [System.Windows.Forms.DataGridView]$Grid,
+        [object[]]$Tracks,
+        [int]$InsertIndex,
+        [int]$OffsetMs = 0
+    )
+
+    $existing = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($row in $Grid.Rows) {
+        if (-not $row.IsNewRow -and $null -ne $row.Tag -and -not [bool]$row.Tag.IsVideoAudio) {
+            [void]$existing.Add([System.IO.Path]::GetFullPath([string]$row.Tag.SourceFile))
+        }
+    }
+
+    $firstAddedRow = -1
+    $addedCount = 0
+    $index = $InsertIndex
+    foreach ($track in $Tracks) {
+        $path = [string]$track.Path
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            continue
+        }
+
+        $fullPath = [System.IO.Path]::GetFullPath($path)
+        if ($existing.Contains($fullPath)) {
+            continue
+        }
+
+        $item = New-TrackItem -SourceFile $fullPath -IsVideoAudio $false -Title ([string]$track.Title) -OffsetMs $OffsetMs
+        Add-TrackRow -Grid $Grid -Item $item -Index $index
+        if ($firstAddedRow -lt 0) {
+            $firstAddedRow = [math]::Min($index, $Grid.Rows.Count - 1)
+        }
+        $index++
+        $addedCount++
+    }
+
+    if ($addedCount -gt 0) {
+        Update-TrackNumbers -Grid $Grid
+        Sync-AudioFilesFromGrid -Grid $Grid
+        $Grid.CurrentCell = $Grid.Rows[$firstAddedRow].Cells[1]
+    }
+
+    return $addedCount
+}
+
+# モデル選択のコンボボックスに、役割が合うモデルを並べる。戻り値はキーの配列（Items と同じ順）
+function Set-SeparationModelComboItems {
+    param(
+        [System.Windows.Forms.ComboBox]$ComboBox,
+        [object[]]$Models,
+        [string]$Role,
+        [string]$SelectedKey
+    )
+
+    $ComboBox.Items.Clear()
+    $keys = @()
+    foreach ($model in @($Models | Where-Object { $_.Role -eq $Role })) {
+        $text = [string]$model.Label
+        if (-not $model.Available) {
+            $text += $(if ([string]::IsNullOrWhiteSpace([string]$model.Url)) { '（未配置）' } else { '（初回にダウンロード）' })
+        }
+        [void]$ComboBox.Items.Add($text)
+        $keys += [string]$model.Key
+    }
+
+    $index = [array]::IndexOf($keys, $SelectedKey)
+    if ($index -lt 0) {
+        foreach ($wantAvailable in $true, $false) {
+            for ($candidate = 0; $candidate -lt $keys.Count; $candidate++) {
+                $model = Get-SeparationModel -Models $Models -Key $keys[$candidate]
+                if ($model.Available -eq $wantAvailable -and ($wantAvailable -or -not [string]::IsNullOrWhiteSpace([string]$model.Url))) {
+                    $index = $candidate
+                    break
+                }
+            }
+            if ($index -ge 0) {
+                break
+            }
+        }
+    }
+    if ($index -lt 0 -and $keys.Count -gt 0) {
+        $index = 0
+    }
+    $ComboBox.SelectedIndex = $index
+    return $keys
+}
+
+# 「ボーカル分離」の画面。選択中のトラックを元に分離し、できたファイルをプレビュー付きの一覧で見せて、
+# 採用するものだけを返す。実行中はこの画面の中で進捗を出す
+function Show-SeparationDialog {
+    param(
+        [System.Windows.Forms.Form]$Owner,
+        [string]$SourceFile,
+        [string]$SourceText,
+        [object]$Settings
+    )
+
+    $state = [PSCustomObject]@{
+        Running         = $false
+        CancelRequested = $false
+        Phase           = 'settings'
+        Generated       = @()
+        Bitrate         = '256k'
+        Result          = $null
+    }
+    # プレビュー再生の状態。リデュースの行は伴奏（Player）とボーカル（Player2）を同時に鳴らして量を変える。
+    # Pending は読み込みが終わってから移動する位置（秒）
+    $playback = [PSCustomObject]@{
+        Player        = $null
+        Player2       = $null
+        Tag           = $null
+        Dual          = $false
+        Pending       = $null
+        Playing       = $false
+        Updating      = $false
+        LevelUpdating = $false
+        Loading       = $false
+        Error         = ''
+    }
+    $saved = ConvertTo-SeparationSettings $Settings.Separation
+    # モデル一覧とコンボボックスのキー。フォルダーにモデルを足したあと画面に戻ったときに読み直す
+    $modelState = [PSCustomObject]@{
+        Models    = @(Get-SeparationModelList)
+        VocalKeys = @()
+        LeadKeys  = @()
+    }
+    # できたファイルは採用を決めるまでここに置き、採用したものだけ元のファイルと同じフォルダーへ移す
+    $resultsDir = Join-Path ([System.IO.Path]::GetTempPath()) ('PitaTrack_sep_results_' + [guid]::NewGuid().ToString('N'))
+    $sourceDir = Split-Path -Parent $SourceFile
+    $logPath = [System.IO.Path]::ChangeExtension((Get-SeparationOutputPath -SourceFile $SourceFile -Suffix '_separate'), '.log')
+
+    $dialog = New-Object System.Windows.Forms.Form
+    $dialog.Text = 'ボーカル分離'
+    $dialog.StartPosition = 'CenterParent'
+    $dialog.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+    $dialog.MaximizeBox = $false
+    $dialog.MinimizeBox = $false
+    $dialog.ClientSize = New-Object System.Drawing.Size(520, 452)
+    Set-FormTheme -Form $dialog
+
+    # ---- 設定の面 ----
+    $settingsPanel = New-Object System.Windows.Forms.Panel
+    $settingsPanel.Location = New-Object System.Drawing.Point(0, 0)
+    $settingsPanel.Size = New-Object System.Drawing.Size(520, 344)
+    $settingsPanel.BackColor = Get-UiColor 'Background'
+
+    $sourceLabel = New-Object System.Windows.Forms.Label
+    $sourceLabel.Text = '元のトラック'
+    $sourceLabel.Location = New-Object System.Drawing.Point(12, 15)
+    $sourceLabel.Size = New-Object System.Drawing.Size(76, 22)
+    Set-LabelTheme -Label $sourceLabel -Muted
+
+    $sourceValue = New-Object System.Windows.Forms.Label
+    $sourceValue.Text = $SourceText
+    $sourceValue.Location = New-Object System.Drawing.Point(88, 12)
+    $sourceValue.Size = New-Object System.Drawing.Size(420, 22)
+    $sourceValue.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+    $sourceValue.AutoEllipsis = $true
+    $sourceValue.UseMnemonic = $false
+    Set-PathLabelTheme -Label $sourceValue
+
+    $kindLabel = New-Object System.Windows.Forms.Label
+    $kindLabel.Text = '作るトラック'
+    $kindLabel.Location = New-Object System.Drawing.Point(12, 51)
+    $kindLabel.Size = New-Object System.Drawing.Size(76, 22)
+    Set-LabelTheme -Label $kindLabel -Muted
+
+    $cutCheck = New-Object System.Windows.Forms.CheckBox
+    $cutCheck.Text = 'ボーカルカット（オフボーカル）'
+    $cutCheck.Location = New-Object System.Drawing.Point(88, 48)
+    $cutCheck.Size = New-Object System.Drawing.Size(420, 24)
+    $cutCheck.Checked = $true
+    $cutCheck.TabIndex = 0
+    Set-CheckBoxTheme -CheckBox $cutCheck
+
+    $reduceCheck = New-Object System.Windows.Forms.CheckBox
+    $reduceCheck.Text = 'ボーカルリデュース'
+    $reduceCheck.Location = New-Object System.Drawing.Point(88, 76)
+    $reduceCheck.Size = New-Object System.Drawing.Size(150, 24)
+    $reduceCheck.TabIndex = 1
+    Set-CheckBoxTheme -CheckBox $reduceCheck
+
+    $reduceUpDown = New-Object System.Windows.Forms.NumericUpDown
+    $reduceUpDown.Location = New-Object System.Drawing.Point(240, 77)
+    $reduceUpDown.Size = New-Object System.Drawing.Size(56, 22)
+    $reduceUpDown.Minimum = -20
+    $reduceUpDown.Maximum = 40
+    $reduceUpDown.Value = [int]$saved.ReduceDb
+    $reduceUpDown.TabIndex = 2
+    $reduceUpDown.Font = New-UiFont 9
+
+    $reduceUnitLabel = New-Object System.Windows.Forms.Label
+    $reduceUnitLabel.Text = 'dB 下げる（結果画面で調節可）'
+    $reduceUnitLabel.Location = New-Object System.Drawing.Point(300, 79)
+    $reduceUnitLabel.Size = New-Object System.Drawing.Size(212, 22)
+    Set-LabelTheme -Label $reduceUnitLabel
+
+    $karaokeCheck = New-Object System.Windows.Forms.CheckBox
+    $karaokeCheck.Text = 'コーラスを残してボーカルカット（リードボーカルだけ除く）'
+    $karaokeCheck.Location = New-Object System.Drawing.Point(88, 104)
+    $karaokeCheck.Size = New-Object System.Drawing.Size(420, 24)
+    $karaokeCheck.TabIndex = 3
+    Set-CheckBoxTheme -CheckBox $karaokeCheck
+
+    $twoStageCheck = New-Object System.Windows.Forms.CheckBox
+    $twoStageCheck.Text = 'ボーカルだけを取り出してからリードを除く（2 段方式・おすすめ）'
+    $twoStageCheck.Location = New-Object System.Drawing.Point(108, 130)
+    $twoStageCheck.Size = New-Object System.Drawing.Size(400, 24)
+    $twoStageCheck.Checked = [bool]$saved.TwoStage
+    $twoStageCheck.TabIndex = 4
+    Set-CheckBoxTheme -CheckBox $twoStageCheck
+
+    $vocalsCheck = New-Object System.Windows.Forms.CheckBox
+    $vocalsCheck.Text = 'ボーカルのみ（分離したボーカル）'
+    $vocalsCheck.Location = New-Object System.Drawing.Point(88, 158)
+    $vocalsCheck.Size = New-Object System.Drawing.Size(420, 24)
+    $vocalsCheck.TabIndex = 5
+    Set-CheckBoxTheme -CheckBox $vocalsCheck
+
+    $modelLabel = New-Object System.Windows.Forms.Label
+    $modelLabel.Text = 'モデル'
+    $modelLabel.Location = New-Object System.Drawing.Point(12, 197)
+    $modelLabel.Size = New-Object System.Drawing.Size(70, 22)
+    Set-LabelTheme -Label $modelLabel -Muted
+
+    $vocalModelLabel = New-Object System.Windows.Forms.Label
+    $vocalModelLabel.Text = 'ボーカル'
+    $vocalModelLabel.Location = New-Object System.Drawing.Point(88, 197)
+    $vocalModelLabel.Size = New-Object System.Drawing.Size(124, 22)
+    Set-LabelTheme -Label $vocalModelLabel
+
+    $vocalModelCombo = New-Object System.Windows.Forms.ComboBox
+    $vocalModelCombo.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+    $vocalModelCombo.Location = New-Object System.Drawing.Point(216, 194)
+    $vocalModelCombo.Size = New-Object System.Drawing.Size(292, 22)
+    $vocalModelCombo.TabIndex = 6
+    Set-ComboBoxTheme -ComboBox $vocalModelCombo
+    $modelState.VocalKeys = @(Set-SeparationModelComboItems -ComboBox $vocalModelCombo -Models $modelState.Models -Role 'vocals' -SelectedKey ([string]$saved.VocalModel))
+
+    $leadModelLabel = New-Object System.Windows.Forms.Label
+    $leadModelLabel.Text = 'リードボーカル'
+    $leadModelLabel.Location = New-Object System.Drawing.Point(88, 227)
+    $leadModelLabel.Size = New-Object System.Drawing.Size(124, 22)
+    Set-LabelTheme -Label $leadModelLabel
+
+    $leadModelCombo = New-Object System.Windows.Forms.ComboBox
+    $leadModelCombo.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+    $leadModelCombo.Location = New-Object System.Drawing.Point(216, 224)
+    $leadModelCombo.Size = New-Object System.Drawing.Size(292, 22)
+    $leadModelCombo.TabIndex = 7
+    Set-ComboBoxTheme -ComboBox $leadModelCombo
+    $modelState.LeadKeys = @(Set-SeparationModelComboItems -ComboBox $leadModelCombo -Models $modelState.Models -Role 'lead' -SelectedKey ([string]$saved.LeadModel))
+
+    $allCandidatesCheck = New-Object System.Windows.Forms.CheckBox
+    $allCandidatesCheck.Text = '全モデルで候補を作る'
+    $allCandidatesCheck.Location = New-Object System.Drawing.Point(88, 254)
+    $allCandidatesCheck.Size = New-Object System.Drawing.Size(256, 24)
+    $allCandidatesCheck.TabIndex = 8
+    Set-CheckBoxTheme -CheckBox $allCandidatesCheck
+
+    $openModelsButton = New-Object System.Windows.Forms.Button
+    $openModelsButton.Text = 'モデルフォルダーを開く'
+    $openModelsButton.Location = New-Object System.Drawing.Point(348, 252)
+    $openModelsButton.Size = New-Object System.Drawing.Size(160, 28)
+    $openModelsButton.TabIndex = 12
+    Set-ButtonTheme -Button $openModelsButton
+    $dialogToolTip = New-Object System.Windows.Forms.ToolTip
+    $dialogToolTip.SetToolTip($allCandidatesCheck, 'ファイルのある全モデルでボーカルカットとコーラス残しを 1 トラックずつ作ります（トラック名にモデル名が付きます）')
+    $dialogToolTip.SetToolTip($openModelsButton, "モデル（.gguf）を置くフォルダーを開きます。`r`n同名の .json に {`"label`": `"表示名`", `"role`": `"vocals または lead`"} を書くと、名前と用途を指定できます。")
+
+    $noteLabel = New-Object System.Windows.Forms.Label
+    $noteLabel.Text = "できたトラックは次の画面で聴いてから、採用するものだけを追加します。`r`n出力は元のファイルと同じフォルダーに m4a で保存します。`r`nGPU がない PC では 1 モデルで数分〜十数分かかります。"
+    $noteLabel.Location = New-Object System.Drawing.Point(88, 284)
+    $noteLabel.Size = New-Object System.Drawing.Size(420, 58)
+    Set-LabelTheme -Label $noteLabel -Muted
+
+    $settingsPanel.Controls.AddRange(@(
+        $sourceLabel, $sourceValue,
+        $kindLabel, $cutCheck, $reduceCheck, $reduceUpDown, $reduceUnitLabel, $karaokeCheck, $twoStageCheck, $vocalsCheck,
+        $modelLabel, $vocalModelLabel, $vocalModelCombo, $leadModelLabel, $leadModelCombo, $allCandidatesCheck, $openModelsButton,
+        $noteLabel
+    ))
+
+    # ---- 結果の面 ----
+    $resultPanel = New-Object System.Windows.Forms.Panel
+    $resultPanel.Location = New-Object System.Drawing.Point(0, 0)
+    $resultPanel.Size = New-Object System.Drawing.Size(520, 344)
+    $resultPanel.BackColor = Get-UiColor 'Background'
+    $resultPanel.Visible = $false
+
+    $resultLabel = New-Object System.Windows.Forms.Label
+    $resultLabel.Text = 'できたトラック（行を選んで再生。トラック名はクリックで候補から選べ、入力もできます）'
+    $resultLabel.Location = New-Object System.Drawing.Point(12, 10)
+    $resultLabel.Size = New-Object System.Drawing.Size(496, 22)
+    Set-LabelTheme -Label $resultLabel -Muted
+
+    $resultGrid = New-Object System.Windows.Forms.DataGridView
+    $resultGrid.Location = New-Object System.Drawing.Point(12, 34)
+    $resultGrid.Size = New-Object System.Drawing.Size(496, 156)
+    $resultGrid.AllowUserToAddRows = $false
+    $resultGrid.AllowUserToDeleteRows = $false
+    $resultGrid.AllowUserToResizeRows = $false
+    $resultGrid.RowHeadersVisible = $false
+    $resultGrid.AutoSizeColumnsMode = 'Fill'
+    $resultGrid.SelectionMode = 'FullRowSelect'
+    $resultGrid.MultiSelect = $false
+    $resultGrid.TabIndex = 0
+    Set-GridTheme -Grid $resultGrid
+
+    $adoptColumn = New-Object System.Windows.Forms.DataGridViewCheckBoxColumn
+    $adoptColumn.HeaderText = '採用'
+    $adoptColumn.AutoSizeMode = [System.Windows.Forms.DataGridViewAutoSizeColumnMode]::None
+    $adoptColumn.Width = 48
+    $resultGrid.Columns.Add($adoptColumn) | Out-Null
+
+    $nameColumn = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
+    $nameColumn.HeaderText = 'トラック名'
+    $nameColumn.FillWeight = 50
+    $resultGrid.Columns.Add($nameColumn) | Out-Null
+
+    $fileColumn = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
+    $fileColumn.HeaderText = 'ファイル'
+    $fileColumn.FillWeight = 50
+    $fileColumn.ReadOnly = $true
+    $resultGrid.Columns.Add($fileColumn) | Out-Null
+
+    # リデュースの行を選んでいるときだけ出す「ボーカル量」のスライダー
+    $levelLabel = New-Object System.Windows.Forms.Label
+    $levelLabel.Text = 'ボーカル量'
+    $levelLabel.Location = New-Object System.Drawing.Point(12, 198)
+    $levelLabel.Size = New-Object System.Drawing.Size(76, 22)
+    $levelLabel.Visible = $false
+    Set-LabelTheme -Label $levelLabel -Muted
+
+    $levelBar = New-Object System.Windows.Forms.TrackBar
+    $levelBar.AutoSize = $false
+    $levelBar.Location = New-Object System.Drawing.Point(88, 194)
+    $levelBar.Size = New-Object System.Drawing.Size(180, 30)
+    $levelBar.Minimum = -20
+    $levelBar.Maximum = 40
+    $levelBar.TickFrequency = 10
+    $levelBar.SmallChange = 1
+    $levelBar.LargeChange = 3
+    $levelBar.Visible = $false
+    $levelBar.TabIndex = 1
+
+    $levelValue = New-Object System.Windows.Forms.Label
+    $levelValue.Text = ''
+    $levelValue.Location = New-Object System.Drawing.Point(272, 198)
+    $levelValue.Size = New-Object System.Drawing.Size(236, 22)
+    $levelValue.Visible = $false
+    Set-LabelTheme -Label $levelValue
+
+    $playButton = New-Object System.Windows.Forms.Button
+    $playButton.Text = '▶ 再生'
+    $playButton.Location = New-Object System.Drawing.Point(12, 232)
+    $playButton.Size = New-Object System.Drawing.Size(84, 28)
+    $playButton.TabIndex = 2
+    Set-ButtonTheme -Button $playButton
+
+    $stopButton = New-Object System.Windows.Forms.Button
+    $stopButton.Text = '■ 停止'
+    $stopButton.Location = New-Object System.Drawing.Point(100, 232)
+    $stopButton.Size = New-Object System.Drawing.Size(84, 28)
+    $stopButton.TabIndex = 3
+    Set-ButtonTheme -Button $stopButton
+
+    $positionBar = New-Object System.Windows.Forms.TrackBar
+    $positionBar.AutoSize = $false
+    $positionBar.Location = New-Object System.Drawing.Point(190, 231)
+    $positionBar.Size = New-Object System.Drawing.Size(160, 30)
+    $positionBar.Minimum = 0
+    $positionBar.Maximum = 100
+    $positionBar.TickStyle = [System.Windows.Forms.TickStyle]::None
+    $positionBar.TabIndex = 4
+
+    $timeLabel = New-Object System.Windows.Forms.Label
+    $timeLabel.Text = '0:00 / 0:00'
+    $timeLabel.Location = New-Object System.Drawing.Point(352, 235)
+    $timeLabel.Size = New-Object System.Drawing.Size(76, 22)
+    $timeLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
+    Set-LabelTheme -Label $timeLabel
+
+    $saveButton = New-Object System.Windows.Forms.Button
+    $saveButton.Text = '保存...'
+    $saveButton.Location = New-Object System.Drawing.Point(432, 232)
+    $saveButton.Size = New-Object System.Drawing.Size(76, 28)
+    $saveButton.TabIndex = 5
+    Set-ButtonTheme -Button $saveButton
+
+    $resultHint = New-Object System.Windows.Forms.Label
+    $resultHint.Text = "再生中に別の行を選ぶと、同じ位置のままそのトラックに切り替わります（聴き比べ用）。`r`n採用したトラックは元のファイルと同じフォルダーに保存して一覧に追加します。`r`n採用しないトラックは「保存...」で残せます。残りはこの画面を閉じるときに消えます。"
+    $resultHint.Location = New-Object System.Drawing.Point(12, 268)
+    $resultHint.Size = New-Object System.Drawing.Size(496, 58)
+    Set-LabelTheme -Label $resultHint -Muted
+
+    $resultPanel.Controls.AddRange(@($resultLabel, $resultGrid, $levelLabel, $levelBar, $levelValue, $playButton, $stopButton, $positionBar, $timeLabel, $saveButton, $resultHint))
+
+    # ---- 共通の下部 ----
+    $progressBar = New-Object System.Windows.Forms.ProgressBar
+    $progressBar.Location = New-Object System.Drawing.Point(12, 348)
+    $progressBar.Size = New-Object System.Drawing.Size(496, 18)
+    $progressBar.Minimum = 0
+    $progressBar.Maximum = 100
+    $progressBar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
+
+    $statusText = New-Object System.Windows.Forms.Label
+    $statusText.Text = ''
+    $statusText.Location = New-Object System.Drawing.Point(12, 372)
+    $statusText.Size = New-Object System.Drawing.Size(496, 22)
+    $statusText.AutoEllipsis = $true
+    Set-LabelTheme -Label $statusText -Muted
+
+    $backButton = New-Object System.Windows.Forms.Button
+    $backButton.Text = '← やり直す'
+    $backButton.Location = New-Object System.Drawing.Point(12, 410)
+    $backButton.Size = New-Object System.Drawing.Size(110, 30)
+    $backButton.TabIndex = 11
+    $backButton.Visible = $false
+    Set-ButtonTheme -Button $backButton
+
+    $runButton = New-Object System.Windows.Forms.Button
+    $runButton.Text = '実行'
+    $runButton.Location = New-Object System.Drawing.Point(254, 410)
+    $runButton.Size = New-Object System.Drawing.Size(162, 30)
+    $runButton.TabIndex = 9
+    Set-ButtonTheme -Button $runButton -Kind Primary
+
+    $cancelButton = New-Object System.Windows.Forms.Button
+    $cancelButton.Text = 'キャンセル'
+    $cancelButton.Location = New-Object System.Drawing.Point(416, 410)
+    $cancelButton.Size = New-Object System.Drawing.Size(92, 30)
+    $cancelButton.TabIndex = 10
+    Set-ButtonTheme -Button $cancelButton
+
+    $inputControls = @($cutCheck, $reduceCheck, $reduceUpDown, $karaokeCheck, $twoStageCheck, $vocalsCheck, $vocalModelCombo, $leadModelCombo, $allCandidatesCheck, $runButton)
+    $setInputsEnabled = {
+        param([bool]$enabled)
+
+        foreach ($control in $inputControls) {
+            $control.Enabled = $enabled
+        }
+        if ($enabled) {
+            $twoStageCheck.Enabled = $karaokeCheck.Checked
+        }
+    }
+    $onProgress = {
+        param(
+            [int]$percent,
+            [string]$text
+        )
+
+        $progressBar.Value = [math]::Max(0, [math]::Min(100, $percent))
+        $statusText.Text = $text
+        [System.Windows.Forms.Application]::DoEvents()
+    }
+    $getSelectedKey = {
+        param(
+            [System.Windows.Forms.ComboBox]$combo,
+            [string[]]$keys
+        )
+
+        if ($combo.SelectedIndex -lt 0 -or $combo.SelectedIndex -ge $keys.Count) {
+            return ''
+        }
+        return $keys[$combo.SelectedIndex]
+    }
+
+    # ---- プレビュー再生（.NET の MediaPlayer。AAC/m4a も再生できる） ----
+    $formatTime = {
+        param([double]$seconds)
+
+        $total = [int][math]::Floor([math]::Max(0, $seconds))
+        return '{0}:{1:00}' -f [int][math]::Floor($total / 60), ($total % 60)
+    }
+    $ensurePlayer = {
+        if ($null -ne $playback.Player -or -not [string]::IsNullOrEmpty($playback.Error)) {
+            return
+        }
+        try {
+            Add-Type -AssemblyName PresentationCore
+            $playback.Player = New-Object System.Windows.Media.MediaPlayer
+            $playback.Player.Volume = 0.8
+        }
+        catch {
+            $playback.Error = $_.Exception.GetBaseException().Message
+        }
+    }
+    $getSelectedTag = {
+        if ($null -eq $resultGrid.CurrentRow) {
+            return $null
+        }
+        return $resultGrid.CurrentRow.Tag
+    }
+    # リデュースのプレビューは伴奏と ボーカルを別々に鳴らす。伴奏 = 元音源 − ボーカル なので、
+    # 書き出しの係数（MixGain, StemGain）から 伴奏の音量 = MixGain、ボーカルの音量 = MixGain + StemGain になる
+    $reduceGains = {
+        param([int]$db)
+
+        $gains = Get-SeparationReduceGains -Db $db
+        return @([double]$gains[0], ([double]$gains[0] + [double]$gains[1]))
+    }
+    $applyVolumes = {
+        if ($null -eq $playback.Player) {
+            return
+        }
+        if ($playback.Dual -and $null -ne $playback.Tag -and $null -ne $playback.Player2) {
+            $gains = & $reduceGains ([int]$playback.Tag.Db)
+            $playback.Player.Volume = 0.8 * $gains[0]
+            $playback.Player2.Volume = 0.8 * $gains[1]
+        }
+        else {
+            $playback.Player.Volume = 0.8
+        }
+    }
+    $startPlayback = {
+        param(
+            [object]$tag,
+            [double]$positionSeconds
+        )
+
+        & $ensurePlayer
+        if ($null -eq $playback.Player) {
+            $statusText.Text = 'プレビューを再生できません: ' + $playback.Error
+            return
+        }
+        $dual = ($tag.Kind -eq 'reduce' -and -not [string]::IsNullOrEmpty([string]$tag.InstPath) -and -not [string]::IsNullOrEmpty([string]$tag.VocalsPath))
+        $playback.Tag = $tag
+        $playback.Dual = $dual
+        $playback.Pending = $positionSeconds
+        $playback.Playing = $true
+        if ($dual) {
+            if ($null -eq $playback.Player2) {
+                $playback.Player2 = New-Object System.Windows.Media.MediaPlayer
+            }
+            & $applyVolumes
+            $playback.Player.Open((New-Object System.Uri -ArgumentList ([string]$tag.InstPath)))
+            $playback.Player2.Open((New-Object System.Uri -ArgumentList ([string]$tag.VocalsPath)))
+        }
+        else {
+            if ($null -ne $playback.Player2) {
+                $playback.Player2.Close()
+            }
+            & $applyVolumes
+            $playback.Player.Open((New-Object System.Uri -ArgumentList ([string]$tag.Path)))
+        }
+        $playButton.Text = '❚❚ 一時停止'
+    }
+    $stopPlayback = {
+        param([bool]$resetPosition)
+
+        $playback.Playing = $false
+        $playback.Pending = $null
+        foreach ($player in @($playback.Player, $playback.Player2)) {
+            if ($null -eq $player) {
+                continue
+            }
+            if ($resetPosition) {
+                $player.Stop()
+            }
+            else {
+                $player.Pause()
+            }
+        }
+        $playButton.Text = '▶ 再生'
+        if ($resetPosition) {
+            $playback.Updating = $true
+            $positionBar.Value = 0
+            $playback.Updating = $false
+        }
+    }
+    $closePlayer = {
+        foreach ($name in 'Player', 'Player2') {
+            $player = $playback.$name
+            if ($null -ne $player) {
+                try {
+                    $player.Stop()
+                    $player.Close()
+                }
+                catch {
+                }
+                $playback.$name = $null
+            }
+        }
+        $playback.Tag = $null
+        $playback.Dual = $false
+    }
+
+    $playbackTimer = New-Object System.Windows.Forms.Timer
+    $playbackTimer.Interval = 250
+    $playbackTimer.Add_Tick({
+        if ($null -eq $playback.Player) {
+            return
+        }
+        $player = $playback.Player
+        if (-not $player.NaturalDuration.HasTimeSpan) {
+            return
+        }
+        if ($playback.Dual -and ($null -eq $playback.Player2 -or -not $playback.Player2.NaturalDuration.HasTimeSpan)) {
+            return
+        }
+        $duration = $player.NaturalDuration.TimeSpan.TotalSeconds
+        if ($null -ne $playback.Pending) {
+            # 読み込みが終わったので、指定の位置に移動してから再生する（2 本のときは同じ位置に揃える）
+            $target = [TimeSpan]::FromSeconds([math]::Min($playback.Pending, [math]::Max(0, $duration - 0.5)))
+            $player.Position = $target
+            if ($playback.Dual) {
+                $playback.Player2.Position = $target
+            }
+            $playback.Pending = $null
+            if ($playback.Playing) {
+                if ($playback.Dual) {
+                    $playback.Player2.Play()
+                }
+                $player.Play()
+            }
+        }
+        $position = $player.Position.TotalSeconds
+        $playback.Updating = $true
+        $positionBar.Maximum = [math]::Max(1, [int][math]::Ceiling($duration))
+        $positionBar.Value = [math]::Max(0, [math]::Min($positionBar.Maximum, [int]$position))
+        $playback.Updating = $false
+        $timeLabel.Text = (& $formatTime $position) + ' / ' + (& $formatTime $duration)
+        if ($playback.Playing -and $position -ge $duration - 0.3) {
+            & $stopPlayback $true
+        }
+    })
+
+    $playButton.Add_Click({
+        $tag = & $getSelectedTag
+        if ($null -eq $tag) {
+            return
+        }
+        if ($playback.Playing) {
+            & $stopPlayback $false
+            return
+        }
+        if ($tag -eq $playback.Tag -and $null -ne $playback.Player -and $playback.Player.NaturalDuration.HasTimeSpan) {
+            # 一時停止からの再開
+            $playback.Playing = $true
+            if ($playback.Dual -and $null -ne $playback.Player2) {
+                $playback.Player2.Play()
+            }
+            $playback.Player.Play()
+            $playButton.Text = '❚❚ 一時停止'
+            return
+        }
+        & $startPlayback $tag ([double]$positionBar.Value)
+    })
+
+    $stopButton.Add_Click({
+        & $stopPlayback $true
+    })
+
+    $positionBar.Add_Scroll({
+        if ($playback.Updating -or $null -eq $playback.Player -or -not $playback.Player.NaturalDuration.HasTimeSpan) {
+            return
+        }
+        $target = [TimeSpan]::FromSeconds($positionBar.Value)
+        $playback.Player.Position = $target
+        if ($playback.Dual -and $null -ne $playback.Player2) {
+            $playback.Player2.Position = $target
+        }
+        $timeLabel.Text = (& $formatTime $positionBar.Value) + ' / ' + (& $formatTime $playback.Player.NaturalDuration.TimeSpan.TotalSeconds)
+    })
+
+    $updateLevelControls = {
+        param([object]$tag)
+
+        $isReduce = ($null -ne $tag -and $tag.Kind -eq 'reduce')
+        $levelLabel.Visible = $isReduce
+        $levelBar.Visible = $isReduce
+        $levelValue.Visible = $isReduce
+        if ($isReduce) {
+            $playback.LevelUpdating = $true
+            $levelBar.Value = [math]::Max($levelBar.Minimum, [math]::Min($levelBar.Maximum, [int]$tag.Db))
+            $playback.LevelUpdating = $false
+            $levelValue.Text = (Format-SeparationReduceTitle -Db ([int]$tag.Db)) + (Format-SeparationLevelNote -Db ([int]$tag.Db))
+        }
+    }
+
+    $levelBar.Add_Scroll({
+        if ($playback.LevelUpdating -or $null -eq $resultGrid.CurrentRow) {
+            return
+        }
+        $tag = $resultGrid.CurrentRow.Tag
+        if ($null -eq $tag -or $tag.Kind -ne 'reduce') {
+            return
+        }
+        $tag.Db = [int]$levelBar.Value
+        $levelValue.Text = (Format-SeparationReduceTitle -Db ([int]$tag.Db)) + (Format-SeparationLevelNote -Db ([int]$tag.Db))
+        # トラック名を自分で変えていなければ、新しい量に合わせて付け直す
+        if ([string]$resultGrid.CurrentRow.Cells[1].Value -eq [string]$tag.AutoTitle) {
+            $tag.AutoTitle = Expand-SeparationTitleTemplate -Template ([string]$tag.Template) -ModelShort ([string]$tag.ModelShort) -Db ([int]$tag.Db) -IncludeModel ([bool]$tag.IncludeModel) -ExtraNotes @($tag.ExtraNotes)
+            $resultGrid.CurrentRow.Cells[1].Value = $tag.AutoTitle
+        }
+        if ($playback.Dual -and $tag -eq $playback.Tag) {
+            & $applyVolumes
+        }
+    })
+
+    $resultGrid.Add_SelectionChanged({
+        if ($playback.Loading) {
+            return
+        }
+        $tag = & $getSelectedTag
+        $saveButton.Enabled = ($null -ne $tag -and [bool]$tag.Generated)
+        & $updateLevelControls $tag
+        if ($null -eq $tag -or $tag -eq $playback.Tag) {
+            return
+        }
+        if ($playback.Playing -and $null -ne $playback.Player) {
+            # 同じ位置のまま別のトラックに切り替える
+            $current = $playback.Player.Position.TotalSeconds
+            & $startPlayback $tag $current
+        }
+        elseif ($null -ne $playback.Player) {
+            # 停止中は次の再生がこの行から始まるようにする
+            & $closePlayer
+        }
+    })
+
+    $resultGrid.Add_CurrentCellDirtyStateChanged({
+        if ($resultGrid.IsCurrentCellDirty) {
+            $resultGrid.CommitEdit([System.Windows.Forms.DataGridViewDataErrorContexts]::Commit)
+        }
+    })
+
+    # トラック名の候補: 設定のトラック名候補 + 今回の初期名 + 入力済みの名前
+    $getNameCandidates = {
+        $list = New-Object System.Collections.ArrayList
+        foreach ($candidate in @(Get-TrackNameCandidates -Settings $Settings)) {
+            Add-UniqueStringValue -List $list -Value $candidate
+        }
+        foreach ($row in $resultGrid.Rows) {
+            if ($null -ne $row.Tag -and [bool]$row.Tag.Generated) {
+                Add-UniqueStringValue -List $list -Value ([string]$row.Tag.AutoTitle)
+                Add-UniqueStringValue -List $list -Value ([string]$row.Cells[1].Value)
+            }
+        }
+        return @($list.ToArray() | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    }
+
+    # メイン画面と同じく、トラック名のセルをクリックすると候補のメニューを出す（直接入力もできる）
+    $resultGrid.Add_CellClick({
+        param($sender, $cellEvent)
+
+        if ($cellEvent.ColumnIndex -ne 1 -or $cellEvent.RowIndex -lt 0 -or $cellEvent.RowIndex -ge $resultGrid.Rows.Count) {
+            return
+        }
+        $row = $resultGrid.Rows[$cellEvent.RowIndex]
+        if ($null -eq $row.Tag -or -not [bool]$row.Tag.Generated) {
+            return
+        }
+        $candidates = @(& $getNameCandidates)
+        if ($candidates.Count -eq 0) {
+            return
+        }
+        $menu = New-Object System.Windows.Forms.ContextMenuStrip
+        $menu.ShowImageMargin = $false
+        $currentValue = [string]$row.Cells[1].Value
+        foreach ($candidate in $candidates) {
+            $item = New-Object System.Windows.Forms.ToolStripMenuItem
+            $item.Text = [string]$candidate
+            $item.Tag = [PSCustomObject]@{ RowIndex = $cellEvent.RowIndex; Name = [string]$candidate }
+            if ([string]$candidate -eq $currentValue) {
+                $item.Checked = $true
+            }
+            $item.Add_Click({
+                param($menuSender, $menuEvent)
+
+                $data = $menuSender.Tag
+                $resultGrid.Rows[[int]$data.RowIndex].Cells[1].Value = [string]$data.Name
+            })
+            [void]$menu.Items.Add($item)
+        }
+        $cellRect = $resultGrid.GetCellDisplayRectangle(1, $cellEvent.RowIndex, $true)
+        $menu.Show($resultGrid, $cellRect.Left, $cellRect.Bottom)
+    })
+
+    $resultGrid.Add_EditingControlShowing({
+        if ($null -eq $resultGrid.CurrentCell -or $resultGrid.CurrentCell.ColumnIndex -ne 1) {
+            return
+        }
+        $textBox = $_.Control -as [System.Windows.Forms.TextBox]
+        if ($null -eq $textBox) {
+            return
+        }
+        $source = New-Object System.Windows.Forms.AutoCompleteStringCollection
+        $values = [string[]]@(& $getNameCandidates)
+        if ($values.Count -gt 0) {
+            $source.AddRange($values)
+        }
+        $textBox.AutoCompleteMode = [System.Windows.Forms.AutoCompleteMode]::Suggest
+        $textBox.AutoCompleteSource = [System.Windows.Forms.AutoCompleteSource]::CustomSource
+        $textBox.AutoCompleteCustomSource = $source
+    })
+
+    $showResults = {
+        param([object[]]$outputs)
+
+        $playback.Loading = $true
+        $resultGrid.Rows.Clear()
+        $sourceRow = $resultGrid.Rows.Add($false, '（元の音源）', (Split-Path -Leaf $SourceFile))
+        $resultGrid.Rows[$sourceRow].Tag = [PSCustomObject]@{ Path = $SourceFile; Generated = $false; Kind = 'source'; Db = 0 }
+        $resultGrid.Rows[$sourceRow].Cells[0].ReadOnly = $true
+        $resultGrid.Rows[$sourceRow].Cells[1].ReadOnly = $true
+        $resultGrid.Rows[$sourceRow].DefaultCellStyle.ForeColor = Get-UiColor 'MutedText'
+        foreach ($output in $outputs) {
+            if ([bool]$output.Hidden) {
+                continue
+            }
+            $rowIndex = $resultGrid.Rows.Add($true, [string]$output.Title, (Split-Path -Leaf ([string]$output.Path)))
+            # リデュースの行は、同じモデルの伴奏とボーカルを同時に鳴らしてプレビューする
+            $instPath = ''
+            $vocalsPath = ''
+            if ($output.Kind -eq 'reduce') {
+                $inst = @($outputs | Where-Object { $_.Kind -eq 'cut' -and $_.VocalModel -eq $output.VocalModel }) | Select-Object -First 1
+                $vocals = @($outputs | Where-Object { $_.Kind -eq 'vocals' -and $_.VocalModel -eq $output.VocalModel }) | Select-Object -First 1
+                if ($null -ne $inst -and $null -ne $vocals) {
+                    $instPath = [string]$inst.Path
+                    $vocalsPath = [string]$vocals.Path
+                }
+            }
+            $resultGrid.Rows[$rowIndex].Tag = [PSCustomObject]@{
+                Path = [string]$output.Path; Generated = $true; Kind = [string]$output.Kind
+                VocalModel = [string]$output.VocalModel; Db = $output.Db; GeneratedDb = $output.Db
+                Template = [string]$output.Template; ModelShort = [string]$output.ModelShort; IncludeModel = [bool]$output.IncludeModel; ExtraNotes = @($output.ExtraNotes)
+                AutoTitle = [string]$output.Title
+                MixWav = [string]$output.MixWav; StemWav = [string]$output.StemWav
+                InstPath = $instPath; VocalsPath = $vocalsPath
+            }
+        }
+        $playback.Loading = $false
+        if ($resultGrid.Rows.Count -gt 1) {
+            $resultGrid.CurrentCell = $resultGrid.Rows[1].Cells[1]
+        }
+        & $updateLevelControls (& $getSelectedTag)
+
+        $state.Generated = @($outputs)
+        $state.Phase = 'results'
+        $settingsPanel.Visible = $false
+        $resultPanel.Visible = $true
+        $backButton.Visible = $true
+        $runButton.Text = '採用したトラックを追加'
+        $cancelButton.Text = '閉じる'
+        $dialog.AcceptButton = $null
+        $visibleCount = @($outputs | Where-Object { -not [bool]$_.Hidden }).Count
+        $statusText.Text = '{0} 件できました。聴いてから、採用するトラックを選んで「追加」を押してください。' -f $visibleCount
+        $playbackTimer.Start()
+    }
+    $showSettings = {
+        & $stopPlayback $true
+        & $closePlayer
+        $playbackTimer.Stop()
+        $state.Phase = 'settings'
+        $resultPanel.Visible = $false
+        $settingsPanel.Visible = $true
+        $backButton.Visible = $false
+        $runButton.Text = '実行'
+        $cancelButton.Text = 'キャンセル'
+        $dialog.AcceptButton = $runButton
+        $statusText.Text = ''
+    }
+    # プレビューで開いているファイルは操作できないことがあるので、閉じてから数回試す
+    $invokeFileAction = {
+        param([scriptblock]$action)
+
+        $lastError = $null
+        for ($attempt = 0; $attempt -lt 5; $attempt++) {
+            try {
+                & $action
+                return
+            }
+            catch {
+                $lastError = $_
+                & $closePlayer
+                Start-Sleep -Milliseconds 200
+            }
+        }
+        throw $lastError
+    }
+    $removeResultsDir = {
+        & $closePlayer
+        if (Test-Path -LiteralPath $resultsDir) {
+            Remove-Item -LiteralPath $resultsDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    # リデュースの量を変えた行は、その量で正確に計算したファイルを作り直してから使う
+    $ensureRowFile = {
+        param([object]$row)
+
+        $tag = $row.Tag
+        if ($tag.Kind -ne 'reduce' -or [int]$tag.Db -eq [int]$tag.GeneratedDb) {
+            return [string]$tag.Path
+        }
+        if ([string]::IsNullOrEmpty([string]$tag.MixWav) -or -not (Test-Path -LiteralPath $tag.MixWav -PathType Leaf) -or -not (Test-Path -LiteralPath $tag.StemWav -PathType Leaf)) {
+            throw 'ボーカル量を変えて作り直すための作業ファイルが見つかりません。設定に戻ってやり直してください。'
+        }
+        $ffmpegPath = Get-SupportFilePath -FileName 'ffmpeg.exe'
+        $suffix = Format-SeparationReduceSuffix -Db ([int]$tag.Db) -ModelKey ([string]$tag.VocalModel)
+        $newPath = Join-Path $resultsDir (Split-Path -Leaf (Get-SeparationOutputPath -SourceFile $SourceFile -Suffix $suffix))
+        $gains = Get-SeparationReduceGains -Db ([int]$tag.Db)
+        & $closePlayer
+        $statusText.Text = 'ボーカル量を変えて書き出しています: ' + (Format-SeparationReduceTitle -Db ([int]$tag.Db))
+        [System.Windows.Forms.Application]::DoEvents()
+        New-SeparationDerivedTrack -FfmpegPath $ffmpegPath -MixWav $tag.MixWav -StemWav $tag.StemWav -MixGain ([double]$gains[0]) -StemGain ([double]$gains[1]) -OutputPath $newPath -Bitrate $state.Bitrate -LogPath $logPath -State $null
+        $tag.Path = $newPath
+        $tag.GeneratedDb = [int]$tag.Db
+        $row.Cells[2].Value = Split-Path -Leaf $newPath
+        return $newPath
+    }
+
+    # 書き出しやファイル操作の間（DoEvents で画面は動く）に他のボタンが押されても二重に動かないようにする
+    $setResultBusy = {
+        param([bool]$busy)
+
+        $state.Running = $busy
+        foreach ($control in @($runButton, $backButton, $saveButton, $playButton, $stopButton, $resultGrid, $levelBar, $positionBar)) {
+            $control.Enabled = -not $busy
+        }
+        $dialog.UseWaitCursor = $busy
+        if (-not $busy) {
+            $tag = & $getSelectedTag
+            $saveButton.Enabled = ($null -ne $tag -and [bool]$tag.Generated)
+        }
+    }
+
+    # 選択中のトラックを好きな場所にコピーして残す（採用しなくてもよい）
+    $saveButton.Add_Click({
+        if ($state.Running -or $null -eq $resultGrid.CurrentRow -or $null -eq $resultGrid.CurrentRow.Tag -or -not [bool]$resultGrid.CurrentRow.Tag.Generated) {
+            return
+        }
+        $row = $resultGrid.CurrentRow
+        $saveDialog = New-Object System.Windows.Forms.SaveFileDialog
+        $saveDialog.Title = 'トラックを保存'
+        $saveDialog.Filter = 'M4A (*.m4a)|*.m4a|All files (*.*)|*.*'
+        $suggested = [string]$row.Tag.Path
+        if ($row.Tag.Kind -eq 'reduce') {
+            $suggested = Get-SeparationOutputPath -SourceFile $SourceFile -Suffix (Format-SeparationReduceSuffix -Db ([int]$row.Tag.Db) -ModelKey ([string]$row.Tag.VocalModel))
+        }
+        $saveDialog.FileName = Split-Path -Leaf $suggested
+        $saveDialog.InitialDirectory = $sourceDir
+        $saveDialog.OverwritePrompt = $true
+        if ($saveDialog.ShowDialog($dialog) -ne [System.Windows.Forms.DialogResult]::OK) {
+            return
+        }
+        & $setResultBusy $true
+        try {
+            $destination = $saveDialog.FileName
+            $path = & $ensureRowFile $row
+            & $invokeFileAction { Copy-Item -LiteralPath $path -Destination $destination -Force -ErrorAction Stop }
+            $statusText.Text = '保存しました: ' + $destination
+        }
+        catch {
+            Show-ErrorMessage ("保存できませんでした。`r`n" + $_.Exception.GetBaseException().Message)
+        }
+        finally {
+            & $setResultBusy $false
+        }
+    })
+
+    $twoStageCheck.Enabled = $karaokeCheck.Checked
+    $karaokeCheck.Add_CheckedChanged({
+        $twoStageCheck.Enabled = $karaokeCheck.Checked
+    })
+
+    # モデルフォルダーを読み直してコンボボックスを作り直す（選択はできるだけ保つ）
+    $refreshModels = {
+        $currentVocal = & $getSelectedKey $vocalModelCombo $modelState.VocalKeys
+        $currentLead = & $getSelectedKey $leadModelCombo $modelState.LeadKeys
+        if ([string]::IsNullOrEmpty($currentVocal)) { $currentVocal = [string]$saved.VocalModel }
+        if ([string]::IsNullOrEmpty($currentLead)) { $currentLead = [string]$saved.LeadModel }
+        $modelState.Models = @(Get-SeparationModelList)
+        $modelState.VocalKeys = @(Set-SeparationModelComboItems -ComboBox $vocalModelCombo -Models $modelState.Models -Role 'vocals' -SelectedKey $currentVocal)
+        $modelState.LeadKeys = @(Set-SeparationModelComboItems -ComboBox $leadModelCombo -Models $modelState.Models -Role 'lead' -SelectedKey $currentLead)
+    }
+
+    $openModelsButton.Add_Click({
+        $modelsDir = Get-SeparationModelsDir
+        try {
+            if (-not (Test-Path -LiteralPath $modelsDir -PathType Container)) {
+                New-Item -ItemType Directory -Path $modelsDir -Force | Out-Null
+            }
+            Start-Process -FilePath 'explorer.exe' -ArgumentList (ConvertTo-CommandLineArgument $modelsDir)
+        }
+        catch {
+            Show-ErrorMessage ("フォルダーを開けませんでした。`r`n" + $modelsDir + "`r`n" + $_.Exception.GetBaseException().Message)
+        }
+    })
+
+    # エクスプローラーでモデルを置いて戻ってきたときに一覧を読み直す
+    $dialog.Add_Activated({
+        if (-not $state.Running -and $state.Phase -eq 'settings') {
+            & $refreshModels
+        }
+    })
+
+    $runSeparation = {
+        if (-not ($cutCheck.Checked -or $reduceCheck.Checked -or $karaokeCheck.Checked -or $vocalsCheck.Checked)) {
+            Show-ErrorMessage '作るトラックを選んでください。'
+            return
+        }
+
+        $vocalModel = & $getSelectedKey $vocalModelCombo $modelState.VocalKeys
+        $leadModel = & $getSelectedKey $leadModelCombo $modelState.LeadKeys
+        $needsVocal = $cutCheck.Checked -or $reduceCheck.Checked -or $vocalsCheck.Checked -or ($karaokeCheck.Checked -and $twoStageCheck.Checked)
+        if ($needsVocal -and [string]::IsNullOrEmpty($vocalModel)) {
+            Show-ErrorMessage "ボーカルのモデルがありません。`r`n$(Get-SeparationModelsDir) に GGUF ファイルを置いてください。"
+            return
+        }
+        if ($karaokeCheck.Checked -and [string]::IsNullOrEmpty($leadModel)) {
+            Show-ErrorMessage "リードボーカルのモデルがありません。`r`n$(Get-SeparationModelsDir) に GGUF ファイルを置いてください。"
+            return
+        }
+
+        $ffmpegPath = Request-Ffmpeg
+        if (-not (Test-Path -LiteralPath $ffmpegPath -PathType Leaf)) {
+            Show-ErrorMessage "ffmpeg.exe が見つかりません。`r`n$ffmpegPath"
+            return
+        }
+
+        $state.Running = $true
+        $state.CancelRequested = $false
+        & $setInputsEnabled $false
+        $cancelButton.Text = '中止'
+        $dialog.UseWaitCursor = $true
+        try {
+            $cliPath = Request-BsRoformer -Owner $dialog -OnProgress $onProgress -State $state
+            if ($null -eq $cliPath) {
+                $statusText.Text = ''
+                return
+            }
+
+            # 使うモデルがなければ初回にダウンロードする（候補一括のときはファイルのあるものだけ使うので対象外）
+            $neededKeys = @()
+            if ($needsVocal) { $neededKeys += $vocalModel }
+            if ($karaokeCheck.Checked) { $neededKeys += $leadModel }
+            foreach ($neededKey in @($neededKeys | Select-Object -Unique)) {
+                $neededModel = Get-SeparationModel -Models $modelState.Models -Key $neededKey
+                if (-not (Request-SeparationModel -Model $neededModel -Owner $dialog -OnProgress $onProgress -State $state)) {
+                    $statusText.Text = ''
+                    return
+                }
+            }
+            & $refreshModels
+
+            $request = [PSCustomObject]@{
+                SourceFile    = $SourceFile
+                VocalCut      = $cutCheck.Checked
+                VocalReduce   = $reduceCheck.Checked
+                ReduceDb      = [int]$reduceUpDown.Value
+                Karaoke       = $karaokeCheck.Checked
+                TwoStage      = $twoStageCheck.Checked
+                VocalsOnly    = $vocalsCheck.Checked
+                VocalModel    = $vocalModel
+                LeadModel     = $leadModel
+                AllCandidates = $allCandidatesCheck.Checked
+                TrackNames    = $saved.TrackNames
+                Bitrate       = ConvertTo-ReencodeBitrate $Settings.ReencodeBitrate
+            }
+            $state.Bitrate = [string]$request.Bitrate
+            New-Item -ItemType Directory -Path $resultsDir -Force | Out-Null
+            $outputs = @(Invoke-Separation -Request $request -FfmpegPath $ffmpegPath -CliPath $cliPath -OnProgress $onProgress -State $state -OutputDir $resultsDir)
+
+            # 次回のために選んだモデルなどを覚える
+            $Settings | Add-Member -NotePropertyName 'Separation' -NotePropertyValue (ConvertTo-SeparationSettings $request) -Force
+            try {
+                Save-Settings -Settings $Settings
+            }
+            catch {
+            }
+
+            $state.Running = $false
+            & $showResults $outputs
+        }
+        catch {
+            if ($state.CancelRequested) {
+                $statusText.Text = '中止しました。'
+            }
+            else {
+                $statusText.Text = ''
+                Show-ErrorMessage $_.Exception.GetBaseException().Message
+            }
+        }
+        finally {
+            $state.Running = $false
+            $state.CancelRequested = $false
+            $dialog.UseWaitCursor = $false
+            $progressBar.Value = 0
+            if ($state.Phase -eq 'settings') {
+                $cancelButton.Text = 'キャンセル'
+            }
+            & $setInputsEnabled $true
+        }
+    }
+
+    # 採用したトラックのファイルを元のファイルと同じフォルダーへ移してから返す
+    $adoptTracks = {
+        $resultGrid.EndEdit() | Out-Null
+        $adoptedRows = @()
+        foreach ($row in $resultGrid.Rows) {
+            if ($null -ne $row.Tag -and [bool]$row.Tag.Generated -and [bool]$row.Cells[0].Value) {
+                $adoptedRows += $row
+            }
+        }
+        if ($adoptedRows.Count -eq 0) {
+            Show-ErrorMessage '採用するトラックにチェックを付けてください。'
+            return
+        }
+
+        & $stopPlayback $true
+        $playbackTimer.Stop()
+        & $setResultBusy $true
+        $moved = @()
+        try {
+            foreach ($row in $adoptedRows) {
+                $title = ([string]$row.Cells[1].Value).Trim()
+                $source = & $ensureRowFile $row
+                if ([string]::IsNullOrWhiteSpace($title)) {
+                    $title = [System.IO.Path]::GetFileNameWithoutExtension($source)
+                }
+                $destination = Join-Path $sourceDir (Split-Path -Leaf $source)
+                & $invokeFileAction { Move-Item -LiteralPath $source -Destination $destination -Force -ErrorAction Stop }
+                $moved += [PSCustomObject]@{ Path = $destination; Title = $title }
+            }
+        }
+        catch {
+            Show-ErrorMessage ("ファイルを用意できませんでした。`r`n" + $_.Exception.GetBaseException().Message)
+            & $setResultBusy $false
+            $playbackTimer.Start()
+            return
+        }
+        & $setResultBusy $false
+        $state.Result = $moved
+        $dialog.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    }
+
+    $runButton.Add_Click({
+        if ($state.Running) {
+            return
+        }
+        if ($state.Phase -eq 'results') {
+            & $adoptTracks
+        }
+        else {
+            & $runSeparation
+        }
+    })
+
+    $backButton.Add_Click({
+        if ($state.Running) {
+            return
+        }
+        & $showSettings
+    })
+
+    $cancelButton.Add_Click({
+        if ($state.Running) {
+            # 結果の面でのファイル操作は短いので待ってもらう。分離の実行中なら中止の指示
+            if ($state.Phase -eq 'results') {
+                return
+            }
+            $state.CancelRequested = $true
+            $statusText.Text = '中止しています...'
+            return
+        }
+        if ($state.Phase -eq 'results') {
+            & $stopPlayback $true
+            $playbackTimer.Stop()
+        }
+        $dialog.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    })
+
+    $dialog.Add_FormClosing({
+        param($formSender, $closingEvent)
+
+        # 処理中に閉じようとしたら、中止の指示として扱う
+        if ($state.Running) {
+            $closingEvent.Cancel = $true
+            $state.CancelRequested = $true
+            $statusText.Text = '中止しています...'
+        }
+    })
+
+    $dialog.AcceptButton = $runButton
+    $dialog.CancelButton = $cancelButton
+    $dialog.Controls.AddRange(@($settingsPanel, $resultPanel, $progressBar, $statusText, $backButton, $runButton, $cancelButton))
+
+    $dialogResult = $dialog.ShowDialog($Owner)
+    $playbackTimer.Stop()
+    $playbackTimer.Dispose()
+    & $removeResultsDir
+    $dialog.Dispose()
+    if ($dialogResult -eq [System.Windows.Forms.DialogResult]::OK) {
+        return $state.Result
+    }
+    return $null
+}
+
 # ライセンスの表示。Store 版は dev\build_msix.ps1 が入れる licenses\README.txt を見せる
 function Show-LicenseDialog {
     param([System.Windows.Forms.IWin32Window]$Owner)
@@ -1807,8 +3946,8 @@ function Show-SettingsDialog {
     $dialog = New-Object System.Windows.Forms.Form
     $dialog.Text = '設定'
     $dialog.StartPosition = 'CenterParent'
-    $dialog.Size = New-Object System.Drawing.Size(560, 672)
-    $dialog.MinimumSize = New-Object System.Drawing.Size(520, 592)
+    $dialog.Size = New-Object System.Drawing.Size(560, 822)
+    $dialog.MinimumSize = New-Object System.Drawing.Size(520, 742)
     Set-FormTheme -Form $dialog
 
     $editor = [PSCustomObject]@{
@@ -2008,29 +4147,105 @@ function Show-SettingsDialog {
     $autoOffsetCheck.TabIndex = 11
     Set-CheckBoxTheme -CheckBox $autoOffsetCheck
 
+    $separationSaved = ConvertTo-SeparationSettings $CurrentSettings.Separation
+
+    $sepNameLabel = New-Object System.Windows.Forms.Label
+    $sepNameLabel.Text = 'ボーカル分離で作るトラックの初期名（{model} はモデル名、{db} はリデュース量に置き換わります）'
+    $sepNameLabel.Location = New-Object System.Drawing.Point(12, 534)
+    $sepNameLabel.Size = New-Object System.Drawing.Size(520, 22)
+    $sepNameLabel.Anchor = 'Left,Right,Bottom'
+    Set-LabelTheme -Label $sepNameLabel -Muted
+
+    $sepCutLabel = New-Object System.Windows.Forms.Label
+    $sepCutLabel.Text = 'ボーカルカット'
+    $sepCutLabel.Location = New-Object System.Drawing.Point(12, 562)
+    $sepCutLabel.Size = New-Object System.Drawing.Size(140, 22)
+    $sepCutLabel.Anchor = 'Left,Bottom'
+    Set-LabelTheme -Label $sepCutLabel
+
+    $sepCutText = New-Object System.Windows.Forms.TextBox
+    $sepCutText.Text = [string]$separationSaved.TrackNames.Cut
+    $sepCutText.Location = New-Object System.Drawing.Point(158, 559)
+    $sepCutText.Size = New-Object System.Drawing.Size(374, 22)
+    $sepCutText.Anchor = 'Left,Right,Bottom'
+    $sepCutText.TabIndex = 12
+    Set-TextBoxTheme -TextBox $sepCutText
+
+    $sepReduceLabel = New-Object System.Windows.Forms.Label
+    $sepReduceLabel.Text = 'ボーカルリデュース'
+    $sepReduceLabel.Location = New-Object System.Drawing.Point(12, 594)
+    $sepReduceLabel.Size = New-Object System.Drawing.Size(140, 22)
+    $sepReduceLabel.Anchor = 'Left,Bottom'
+    Set-LabelTheme -Label $sepReduceLabel
+
+    $sepReduceText = New-Object System.Windows.Forms.TextBox
+    $sepReduceText.Text = [string]$separationSaved.TrackNames.Reduce
+    $sepReduceText.Location = New-Object System.Drawing.Point(158, 591)
+    $sepReduceText.Size = New-Object System.Drawing.Size(374, 22)
+    $sepReduceText.Anchor = 'Left,Right,Bottom'
+    $sepReduceText.TabIndex = 13
+    Set-TextBoxTheme -TextBox $sepReduceText
+
+    $sepKaraokeLabel = New-Object System.Windows.Forms.Label
+    $sepKaraokeLabel.Text = 'コーラス残し'
+    $sepKaraokeLabel.Location = New-Object System.Drawing.Point(12, 626)
+    $sepKaraokeLabel.Size = New-Object System.Drawing.Size(140, 22)
+    $sepKaraokeLabel.Anchor = 'Left,Bottom'
+    Set-LabelTheme -Label $sepKaraokeLabel
+
+    $sepKaraokeText = New-Object System.Windows.Forms.TextBox
+    $sepKaraokeText.Text = [string]$separationSaved.TrackNames.Karaoke
+    $sepKaraokeText.Location = New-Object System.Drawing.Point(158, 623)
+    $sepKaraokeText.Size = New-Object System.Drawing.Size(374, 22)
+    $sepKaraokeText.Anchor = 'Left,Right,Bottom'
+    $sepKaraokeText.TabIndex = 14
+    Set-TextBoxTheme -TextBox $sepKaraokeText
+
+    $sepVocalsLabel = New-Object System.Windows.Forms.Label
+    $sepVocalsLabel.Text = 'ボーカルのみ'
+    $sepVocalsLabel.Location = New-Object System.Drawing.Point(12, 658)
+    $sepVocalsLabel.Size = New-Object System.Drawing.Size(140, 22)
+    $sepVocalsLabel.Anchor = 'Left,Bottom'
+    Set-LabelTheme -Label $sepVocalsLabel
+
+    $sepVocalsText = New-Object System.Windows.Forms.TextBox
+    $sepVocalsText.Text = [string]$separationSaved.TrackNames.Vocals
+    $sepVocalsText.Location = New-Object System.Drawing.Point(158, 655)
+    $sepVocalsText.Size = New-Object System.Drawing.Size(374, 22)
+    $sepVocalsText.Anchor = 'Left,Right,Bottom'
+    $sepVocalsText.TabIndex = 15
+    Set-TextBoxTheme -TextBox $sepVocalsText
+
+    $sepNameHint = New-Object System.Windows.Forms.Label
+    $sepNameHint.Text = '例: ボーカル {db}dB → 「ボーカル -8dB」。全モデルで候補を作るときは、{model} がなければ名前の後ろに（モデル名）が付きます。'
+    $sepNameHint.Location = New-Object System.Drawing.Point(12, 684)
+    $sepNameHint.Size = New-Object System.Drawing.Size(520, 36)
+    $sepNameHint.Anchor = 'Left,Right,Bottom'
+    Set-LabelTheme -Label $sepNameHint -Muted
+
     $okButton = New-Object System.Windows.Forms.Button
     $okButton.Text = '保存'
-    $okButton.Location = New-Object System.Drawing.Point(356, 586)
+    $okButton.Location = New-Object System.Drawing.Point(356, 736)
     $okButton.Size = New-Object System.Drawing.Size(84, 30)
     $okButton.Anchor = 'Right,Bottom'
-    $okButton.TabIndex = 12
+    $okButton.TabIndex = 16
     Set-ButtonTheme -Button $okButton -Kind Primary
 
     $cancelButton = New-Object System.Windows.Forms.Button
     $cancelButton.Text = 'キャンセル'
-    $cancelButton.Location = New-Object System.Drawing.Point(448, 586)
+    $cancelButton.Location = New-Object System.Drawing.Point(448, 736)
     $cancelButton.Size = New-Object System.Drawing.Size(84, 30)
     $cancelButton.Anchor = 'Right,Bottom'
-    $cancelButton.TabIndex = 13
+    $cancelButton.TabIndex = 17
     $cancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     Set-ButtonTheme -Button $cancelButton
 
     $licenseButton = New-Object System.Windows.Forms.Button
     $licenseButton.Text = 'ライセンス'
-    $licenseButton.Location = New-Object System.Drawing.Point(12, 586)
+    $licenseButton.Location = New-Object System.Drawing.Point(12, 736)
     $licenseButton.Size = New-Object System.Drawing.Size(100, 30)
     $licenseButton.Anchor = 'Left,Bottom'
-    $licenseButton.TabIndex = 14
+    $licenseButton.TabIndex = 18
     Set-ButtonTheme -Button $licenseButton
     $licenseButton.Add_Click({ Show-LicenseDialog -Owner $dialog })
 
@@ -2276,7 +4491,15 @@ function Show-SettingsDialog {
         }
 
         $candidates = @(ConvertTo-TrackNameCandidateList -Candidates $candidateText.Lines)
-        $newSettings = ConvertTo-SavedSettings -TrackNames $trackNames -LaterName $later -OutputSuffix $suffix -TrackNameCandidates $candidates -DelayMode $delayMode -ReencodeBitrate $bitrate -OffsetStepMs $offsetStepMs -AutoOffsetAlways $autoOffsetCheck.Checked -TrackCountProfiles $profiles
+        # ボーカル分離の設定は、ここで変えられる初期名だけ差し替える（空欄は既定に戻る）
+        $separationSettings = ConvertTo-SeparationSettings $CurrentSettings.Separation
+        $separationSettings.TrackNames = [PSCustomObject]@{
+            Cut     = $sepCutText.Text
+            Reduce  = $sepReduceText.Text
+            Karaoke = $sepKaraokeText.Text
+            Vocals  = $sepVocalsText.Text
+        }
+        $newSettings = ConvertTo-SavedSettings -TrackNames $trackNames -LaterName $later -OutputSuffix $suffix -TrackNameCandidates $candidates -DelayMode $delayMode -ReencodeBitrate $bitrate -OffsetStepMs $offsetStepMs -AutoOffsetAlways $autoOffsetCheck.Checked -TrackCountProfiles $profiles -Separation $separationSettings
         Save-Settings $newSettings
         $dialog.Tag = $newSettings
         $dialog.DialogResult = [System.Windows.Forms.DialogResult]::OK
@@ -2290,7 +4513,9 @@ function Show-SettingsDialog {
         $grid, $addButton, $deleteButton, $suffixLabel, $suffixText, $separator,
         $candidateLabel, $candidateText, $laterLabel, $laterText,
         $delayModeLabel, $delayModeCombo, $bitrateLabel, $bitrateText,
-        $offsetStepLabel, $offsetStepText, $autoOffsetCheck, $okButton, $cancelButton, $licenseButton
+        $offsetStepLabel, $offsetStepText, $autoOffsetCheck,
+        $sepNameLabel, $sepCutLabel, $sepCutText, $sepReduceLabel, $sepReduceText, $sepKaraokeLabel, $sepKaraokeText, $sepVocalsLabel, $sepVocalsText, $sepNameHint,
+        $okButton, $cancelButton, $licenseButton
     ))
 
     $editor.Suppress = $true
@@ -2497,6 +4722,15 @@ function Show-MainForm {
     $swapVideoButton.TabIndex = 7
     Set-ButtonTheme -Button $swapVideoButton
     $offsetToolTip.SetToolTip($swapVideoButton, '選択中の .mp4 トラックと、上の動画ファイルを入れ替えます')
+
+    $separateButton = New-Object System.Windows.Forms.Button
+    $separateButton.Text = 'ボーカル分離'
+    $separateButton.Location = New-Object System.Drawing.Point(754, 312)
+    $separateButton.Size = New-Object System.Drawing.Size(94, 30)
+    $separateButton.Anchor = 'Top,Right'
+    $separateButton.TabIndex = 8
+    Set-ButtonTheme -Button $separateButton
+    $offsetToolTip.SetToolTip($separateButton, '選択中のトラックからオフボーカルやコーラス残しのトラックを作り、その下に追加します')
 
     $outputLabel = New-Object System.Windows.Forms.Label
     $outputLabel.Text = '出力'
@@ -3479,6 +5713,53 @@ function Show-MainForm {
         }
     })
 
+    $separateButton.Add_Click({
+        Complete-TrackNameEdit -Grid $grid -TrackNameColumnIndex $trackNameColumnIndex
+        if ($null -eq $grid.CurrentCell) {
+            Show-ErrorMessage '分離するトラックを選択してください。'
+            return
+        }
+
+        $rowIndex = $grid.CurrentCell.RowIndex
+        if ($rowIndex -lt 0 -or $rowIndex -ge $grid.Rows.Count) {
+            return
+        }
+
+        $row = $grid.Rows[$rowIndex]
+        $tag = $row.Tag
+        if ($null -eq $tag) {
+            Show-ErrorMessage '分離するトラックを選択してください。'
+            return
+        }
+
+        $sourceFile = if ([bool]$tag.IsVideoAudio) { [string]$Script:VideoFile } else { [string]$tag.SourceFile }
+        if ([string]::IsNullOrWhiteSpace($sourceFile) -or -not (Test-Path -LiteralPath $sourceFile -PathType Leaf)) {
+            Show-ErrorMessage "元のファイルが見つかりません。`r`n$sourceFile"
+            return
+        }
+
+        # 分離したトラックは元のトラックと同じだけずらす
+        $offsetMs = ConvertTo-OffsetMs $row.Cells[$offsetColumnIndex].Value
+        if ($null -eq $offsetMs) {
+            $offsetMs = [int]$tag.OffsetMs
+        }
+        $sourceText = '{0}. {1}（{2}）' -f ($rowIndex + 1), [string]$row.Cells[$trackNameColumnIndex].Value, (Get-TrackSourceText $tag)
+
+        $separated = Show-SeparationDialog -Owner $form -SourceFile $sourceFile -SourceText $sourceText -Settings $Script:Settings
+        if ($null -eq $separated -or @($separated).Count -eq 0) {
+            return
+        }
+
+        $addedCount = Add-SeparatedTracksToGrid -Grid $grid -Tracks @($separated) -InsertIndex ($rowIndex + 1) -OffsetMs $offsetMs
+        if ($addedCount -gt 0) {
+            $statusLabel.Text = '分離したトラックを{0}件追加しました' -f $addedCount
+        }
+        else {
+            $statusLabel.Text = '分離したトラックはすでに一覧にあります（ファイルは作り直しました）'
+        }
+        Update-DefaultOutputPath
+    })
+
     $deleteTrackButton.Add_Click({
         if ($null -eq $grid.CurrentCell) {
             Show-ErrorMessage '削除するトラックを選択してください。'
@@ -3642,7 +5923,7 @@ function Show-MainForm {
         $selectedOffsetLabel, $selectedOffsetMinusButton, $selectedOffsetPlusButton,
         $allOffsetLabel, $allOffsetMinusButton, $allOffsetPlusButton,
         $allOffsetText, $allOffsetApplyButton, $autoOffsetButton, $grid,
-        $upButton, $downButton, $addTrackButton, $deleteTrackButton, $swapVideoButton,
+        $upButton, $downButton, $addTrackButton, $deleteTrackButton, $swapVideoButton, $separateButton,
         $outputLabel, $outputText, $browseButton, $settingsButton,
         $statusLabel, $okButton, $cancelButton
     ))

@@ -23,6 +23,7 @@ GUI版のみ:
 - トラック順の変更、追加、削除
 - 動画として使うファイルと、音声トラックにある `.mp4` の入れ替え
 - 動画の音声と比べて、各トラックのオフセットを自動調整
+- 1つの音源からオフボーカル／ボーカルリデュース／コーラス入りオフボーカルのトラックを作成（ボーカル分離。モデルは初めて使うときにダウンロード）
 
 `GUI版のみ` の機能はGUI版だけで使えます。CLI版では、ファイル指定順と実行中の対話入力で処理します。
 
@@ -66,6 +67,7 @@ PitaTrack\
   tools\
     ffmpeg.exe               セットアップか初回起動時にダウンロード
     ffmpeg-licenses\         ffmpeg のライセンスとソースの場所（ffmpeg.exe と一緒にダウンロード）
+    bsroformer\              ボーカル分離のエンジン（BSRoformer.cpp。初めて使うときにダウンロード）
     mixtrack_ffmpeg_gui.ps1
     mixtrack_ffmpeg_gui.settings.json
     pitatrack.ico            アイコン
@@ -83,6 +85,7 @@ PitaTrack\
 - Store版: Windows 10 バージョン 2004 以降、または Windows 11（x64）。ffmpeg は同梱しています。
 - ZIP版: Windows 10 または Windows 11、PowerShell 5.x、`ffmpeg.exe`（セットアップで自動でダウンロード）
 - どちらも Windows に入っている PowerShell を使うため、S モードの Windows では動きません。
+- ボーカル分離を使う場合: Vulkan に対応した GPU（NVIDIA / AMD / Intel）があると速く処理できます。なくても動きますが、1モデルあたり数分〜十数分かかります。
 
 ## インストール
 
@@ -94,6 +97,7 @@ PitaTrack\
 これで使えるようになります。
 
 - ffmpeg（MP4を作るのに必要なソフト）は最初から入っています。ダウンロードは要りません。
+- ボーカル分離のエンジンも入っています。モデルは初めて使うときにダウンロードします。
 - Windows 11 の「スマート アプリ コントロール」がオンになっているPCでも使えます。
 - 新しい版は Microsoft Store から自動で届きます。
 - 動画や音声のファイルを選んで右クリックすると、「ぴたトラックでまとめる」と「ぴたトラック (CLI版) でまとめる」が出ます。スタートメニューの「ぴたトラック」から開くこともできます。
@@ -113,6 +117,7 @@ Microsoft Store を使えないPCや、インストールせずに使いたい�
 これで使えるようになります。
 
 - ffmpeg（MP4を作るのに必要なソフト）は自動でダウンロードされます（約2MB）。自分で用意する必要はありません。
+- ボーカル分離のエンジン（約22MB）とモデルは、初めて使うときにダウンロードします。
 - 管理者権限は不要です。インストール先は `%LOCALAPPDATA%\Programs\PitaTrack` です。
 - 右クリックの **送る**、デスクトップ、スタートメニューに「ぴたトラック」が追加されます。追加するものはインストール画面で選べます。
 - インストールが終わったら、展開したフォルダーとZIPファイルは削除してかまいません。
@@ -134,7 +139,7 @@ Windows 11 の「スマート アプリ コントロール」がオンになっ�
 
 Windowsの **設定 → アプリ → インストールされているアプリ**（Windows 10は **設定 → アプリ → アプリと機能**）で「ぴたトラック」を選び、**アンインストール** を押します。
 
-ショートカット、送るメニュー、設定、`ffmpeg.exe` も削除されます。
+ショートカット、送るメニュー、設定、`ffmpeg.exe` も削除されます。ボーカル分離のモデル（`%LOCALAPPDATA%\PitaTrack\models`）は残るので、不要なら削除してください。
 
 ### インストールせずに使う
 
@@ -260,6 +265,30 @@ ZIP版では、デスクトップの「ぴたトラック」に、動画ファ�
 - どのトラックが `.mp4` かは、トラック一覧の **種類** 列で確認できます（`MP4`、`M4A` など。元動画の音声は `元動画`）。
 - **入力ファイル** 列にはファイル名だけを表示します。マウスを乗せるとフルパスが表示されます。
 
+### ボーカル分離（オフボーカルなどを作る）
+
+1つの音源から、ボーカルを除いた「オフボーカル」、ボーカルを小さくした「ボーカルリデュース」、コーラス（ハモリ）を残してリードボーカルだけを除いた「コーラス入りオフボーカル」のトラックを作って追加できます。
+
+1. 元にする音源をトラックとして置きます（**+ 追加**、ドロップ、または **元動画の音声を1トラック目に使用**）。
+2. その行を選んで **ボーカル分離** を押します。
+3. 作るトラックとモデルを選んで **実行** を押します。初めて使うときは、選んだモデル（Kim 約240MB、anvuew 約53MB）をダウンロードするか聞かれます。ZIP版では、その前に分離エンジン（BSRoformer.cpp、約22MB）のダウンロードも聞かれます（Store版には入っています）。
+4. できたトラックが一覧に出ます。行を選んで **▶ 再生** で聴き比べでき（再生中に別の行を選ぶと同じ位置のまま切り替わります）、ボーカルリデュースは **ボーカル量** のスライダーで聴きながら量を変えられます。トラック名はクリックすると候補（設定のトラック名候補など）から選べ、直接入力もできます。
+5. 採用するトラックにチェックを付けて **採用したトラックを追加** を押すと、元のトラックの下に同じオフセットで追加されます。採用しなかったトラックは **保存...** で別に残せます。残りはこの画面を閉じるときに消えます。
+
+- 出力は元のファイルと同じフォルダーに m4a で保存します（`<元の名前>_offvocal_kim.m4a` など）。
+- **全モデルで候補を作る** にチェックを付けると、入っている全モデルで1トラックずつ作ります。曲によって向くモデルが違うので、聴き比べて選べます。
+- 処理には GPU を使います（Vulkan に対応した NVIDIA / AMD / Intel）。GPU がない PC でも動きますが、1モデルあたり数分〜十数分かかります。
+- モデルは `%LOCALAPPDATA%\PitaTrack\models` に置かれます（Store版は、設定と同じくアプリ専用の場所 `%LOCALAPPDATA%\Packages\` の下に置かれ、アンインストールすると消えます）。**モデルフォルダーを開く** でこのフォルダーが開き、BSRoformer.cpp 用の GGUF 形式のモデル（BS-Roformer / Mel-Band Roformer 系）を自分で置くこともできます。同じ名前の `.json` に `{"label": "表示名", "short": "短い名前", "role": "vocals または lead"}` を書くと、表示名・トラック名の `{model}` に使う短い名前・用途を指定できます。
+
+標準のモデルは次の2つです。ダウンロード時にライセンス文（`*.LICENSE.txt`）も同じフォルダーに置かれます。
+
+| モデル | 用途 | 作者 | ライセンス |
+|---|---|---|---|
+| Kim Mel-Roformer | ボーカル（オフボーカル、ボーカルリデュース） | Kimberley Jensen | MIT |
+| BS-Roformer Karaoke anvuew | リードボーカル（コーラス入りオフボーカル） | anvuew | GPL-3.0 |
+
+どちらも元の重みを [BSRoformer.cpp](https://github.com/chenmozhijin/BSRoformer.cpp)（MIT）で GGUF 形式に変換したものを、[GitHub Releases](https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/separation-models-20261019) からダウンロードします。分離エンジンの BSRoformer.cpp（MIT）と ggml（MIT）は、作者が配布している Windows 用（Vulkan 版）のファイルをそのまま使います。ZIP版は初めて使うときに `tools\bsroformer` にダウンロードし、Store版には最初から入っています（ライセンスは **設定 → ライセンス** で見られます）。
+
 ### キーボードだけで操作する
 
 起動後、`Tab`、文字入力、`Enter` だけでも保存まで進められるようにしています。`Esc` でウインドウを閉じます。
@@ -331,6 +360,7 @@ GUIの **設定** ボタンから変更できます。
 - 音声を遅らせる方法と、再エンコード時のビットレート
 - オフセットのボタンで増減する幅
 - 自動調整を常に行うかどうか
+- ボーカル分離で作るトラックの初期名（ボーカルカット／ボーカルリデュース／コーラス残し／ボーカルのみ。`{model}` はモデル名、`{db}` はリデュース量（`-8` や `+6`）に置き換わります）
 
 GUIで保存した設定は `tools\mixtrack_ffmpeg_gui.settings.json` に保存されます（インストールした場合は `%LOCALAPPDATA%\Programs\PitaTrack\tools\mixtrack_ffmpeg_gui.settings.json`）。Store版は、アプリ専用の場所（`%LOCALAPPDATA%\Packages\` の下）に保存され、アンインストールすると消えます。
 
@@ -475,6 +505,10 @@ ZIP版の話です（Store版には ffmpeg が入っています）。GUI版・C
 インターネットにつながらないなどでダウンロードできない場合は、[ffmpeg.org](https://ffmpeg.org/download.html) から入手した `ffmpeg.exe` を `tools` フォルダーにコピーしてください。
 CLI版は `tools\ffmpeg.exe` を優先し、見つからない場合はルートの `ffmpeg.exe` も探します。
 
+### ボーカル分離のダウンロードができない
+
+モデル（ZIP版では分離エンジンも）はインターネットからダウンロードするため、つながらない環境ではボーカル分離は使えません。別のPCでダウンロードしたファイルを、モデルは **モデルフォルダーを開く** で開くフォルダーに、ZIP版の分離エンジンは `tools\bsroformer` に置けば使えます。ダウンロード元は、ダウンロード前の確認画面に表示されます。
+
 ### 右クリックに「送る」が見当たらない
 
 Windows 11では、右クリック → **その他のオプションを確認** を選ぶと **送る** が表示されます。
@@ -534,10 +568,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File dev\build_release.ps1
 `dist\PitaTrack_vX.Y.Z.zip` が作られます。
 
 - 版は `tools\setup.ps1` の `$Script:AppVersion` から読み取ります。リリース前にここを更新してください。
-- gitで管理しているファイルだけを入れます（`dev` フォルダーと `ffmpeg.exe` は入りません）。新しく追加したファイルは、先に `git add` してください。
+- gitで管理しているファイルだけを入れます（`dev` フォルダー、`ffmpeg.exe`、`tools\bsroformer` は入りません）。新しく追加したファイルは、先に `git add` してください。
 - ダウンロードする ffmpeg の版を変えるときは、先に [dev/ffmpeg-lgpl/README.md](dev/ffmpeg-lgpl/README.md) の手順で新しい Release を作り、その zip の URL と SHA256（Release の `SHA256SUMS.txt`）を `tools\setup.ps1` の `$Script:FfmpegUrl` と `$Script:FfmpegSha256` に入れます。
 - アイコンは `tools\pitatrack.ico` です。差し替えると、次のインストール（または `tools\makesendto` の実行）から、`PitaTrack.exe`・ショートカット・画面のアイコンに反映されます。
 
 ## ぴたトラック用の ffmpeg（開発者向け）
 
 ZIP 版のセットアップがダウンロードし、Store 版（MSIX）に同梱する `ffmpeg.exe` は、FFmpeg 公式のソースから LGPL の部品だけでビルドします（GitHub Actions の「FFmpeg LGPL build」）。作り方、確かめ方、GitHub Release への置き方、ライセンス表示の文案は [dev/ffmpeg-lgpl/README.md](dev/ffmpeg-lgpl/README.md) にあります。
+
+## ボーカル分離のエンジンとモデル（開発者向け）
+
+分離エンジンは [BSRoformer.cpp](https://github.com/chenmozhijin/BSRoformer.cpp) の GitHub Releases にある Windows 用（Vulkan 版）の zip をそのまま使います。ZIP 版は `tools\mixtrack_ffmpeg_gui.ps1` の `$Script:BsRoformerUrl` と `$Script:BsRoformerSha256` を見て、初めて使うときに `tools\bsroformer` へダウンロードします。Store 版は、実行ファイルをあとからダウンロードできない（Store の規約と、インストール先が書き込めないため）ので、`dev\build_msix.ps1` でパッケージに入れます。
+
+モデルは、元の重みを BSRoformer.cpp の `scripts/convert_to_gguf.py` で q8_0 の GGUF に変換し、GitHub Release [separation-models-20261019](https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/separation-models-20261019) に GGUF・ライセンス文（`*.LICENSE.txt`）・`models.json`・`SHA256SUMS` を置いています。アプリは `$Script:SeparationModels` の URL と SHA256 を見てダウンロードします。モデルを足す・替えるときは新しいタグの Release を作り、`$Script:SeparationModelsReleaseUrl` と各モデルの SHA256 を更新します。検討の記録と変換の手順は [dev/vocal-separation-feasibility.md](dev/vocal-separation-feasibility.md) と [dev/vocal-separation/README.md](dev/vocal-separation/README.md) にあります。
