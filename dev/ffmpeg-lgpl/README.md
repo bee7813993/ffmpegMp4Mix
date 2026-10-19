@@ -28,11 +28,13 @@ Store 版（MSIX）のぴたトラックに同梱し、ZIP 版の `tools\setup.p
 |---|---|
 | 読む（入れ物） | mov（.mp4 .m4a .mov）、aac（ADTS）、mp3、wav、flac、ogg。ファイルとパイプ |
 | 読む（音声のデコード） | aac、mp3、vorbis、opus、flac、alac、pcm（8/16/24/32 ビット整数、32/64 ビット浮動小数点） |
-| 書く | mp4、f32le（自動調整の取り出し）。エンコーダーは aac と pcm_f32le だけ |
-| フィルター | adelay、aresample（と ffmpeg.exe が自動で入れる aformat、anull、atrim など） |
+| 書く | mp4、ipod（ボーカル分離で作る .m4a）、wav（ボーカル分離のエンジンに渡す 44.1 kHz float の WAV）、f32le（自動調整の取り出し）。エンコーダーは aac と pcm_f32le だけ |
+| フィルター | adelay、aresample、amerge、pan、alimiter（ボーカル分離で 元音源 − ステム × k を作り、ピークを抑える）（と ffmpeg.exe が自動で入れる aformat、anull、atrim など） |
 | そのほか | aac_adtstoasc（.aac を MP4 にコピーするとき）、aac・mpegaudio・flac・vorbis・opus・h264・hevc のパーサー |
 
-映像はいつもコピーなので、映像のデコーダーとエンコーダーは入っていません。動画の音声も、ずらさなければコピーするので、デコーダーがない形式（AC-3 など）でもそのまま入ります。デコーダーが要るのは、AAC に再エンコードするトラックと、自動調整で解析するファイルです。
+映像はいつもコピーなので、映像のデコーダーとエンコーダーは入っていません。動画の音声も、ずらさなければコピーするので、デコーダーがない形式（AC-3 など）でもそのまま入ります。デコーダーが要るのは、AAC に再エンコードするトラックと、自動調整で解析するファイル（基準にする動画の音声を含む）、ボーカル分離の元音源です。デコーダーのない形式（MP4 の中の AC-3 など）の音声は、まとめることはできても、自動調整とボーカル分離の対象にはできません。
+
+ビルド番号の履歴: pitatrack1（2026-10-18）は MP4 にまとめる部品と自動調整の部品だけ。pitatrack2（2026-10-19）で、ボーカル分離に使う wav・ipod のマルチプレクサーと amerge・pan・alimiter を足しました。pitatrack1 の ffmpeg.exe ではボーカル分離の変換（`Unable to choose an output format for '...mix.wav'`）が失敗します。
 
 ## GitHub Actions
 
@@ -49,35 +51,32 @@ artifact:
 
 | 名前 | 中身 |
 |---|---|
-| `ffmpeg-9.0.2-pitatrack1-lgpl-win64` | `ffmpeg.exe`、`LICENSE.txt`（LGPL 2.1 の全文）、`FFmpeg-LICENSE.md`、`README.txt`（ソースの場所）、`BUILD.txt`（configure の指定とビルド環境）、`configure-options.txt`、`mingw-w64-runtime-copyright.txt`、`SHA256SUMS.txt` |
-| `ffmpeg-9.0.2-pitatrack1-source` | `ffmpeg-9.0.2.tar.xz`（公式のソース）とその署名、`BUILD.txt`、ビルドに使ったスクリプトと指定 |
-| `ffmpeg-9.0.2-pitatrack1-test-report` | 確かめた結果（`test-report.md`）、`ffmpeg -version`・`-buildconf`・`-L`・部品の一覧、ffmpeg のログ |
+| `ffmpeg-9.0.2-pitatrack2-lgpl-win64` | `ffmpeg.exe`、`LICENSE.txt`（LGPL 2.1 の全文）、`FFmpeg-LICENSE.md`、`README.txt`（ソースの場所）、`BUILD.txt`（configure の指定とビルド環境）、`configure-options.txt`、`mingw-w64-runtime-copyright.txt`、`SHA256SUMS.txt` |
+| `ffmpeg-9.0.2-pitatrack2-source` | `ffmpeg-9.0.2.tar.xz`（公式のソース）とその署名、`BUILD.txt`、ビルドに使ったスクリプトと指定 |
+| `ffmpeg-9.0.2-pitatrack2-test-report` | 確かめた結果（`test-report.md`）、`ffmpeg -version`・`-buildconf`・`-L`・部品の一覧、ffmpeg のログ |
 
 ## Store 版のパッケージに入れる
 
-artifact を取ってきて、`dev\build_msix.ps1`（PR #5）の `-FfmpegPath` に渡します。
+`dev\build_msix.ps1` は、GitHub Release の `ffmpeg-<版>-pitatrack<番号>-lgpl-win64.zip`（`$ffmpegRelease` と `$ffmpegFiles` の SHA256）をダウンロードして照らし合わせ、`ffmpeg.exe` と同じフォルダーのライセンスのファイル（[license-notice.md](license-notice.md) の「パッケージに入れるファイル」）をパッケージに入れます。Release を作る前に手元のビルド（`build.sh` の出力フォルダー）で試すときは `-FfmpegDir` に渡します。試験用で、`licenses\README.txt` の版と URL は Release のもののままなので、Store には出しません。
 
 ```bat
-gh run download <実行の ID> -n ffmpeg-9.0.2-pitatrack1-lgpl-win64 -D dist\ffmpeg-lgpl
-powershell -NoProfile -ExecutionPolicy Bypass -File dev\build_msix.ps1 -FfmpegPath dist\ffmpeg-lgpl\ffmpeg.exe
+powershell -NoProfile -ExecutionPolicy Bypass -File dev\build_msix.ps1 -Register -DevIdentity -FfmpegDir dist\ffmpeg-lgpl\ffmpeg-9.0.2-pitatrack2-lgpl-win64
 ```
-
-GitHub Release に置いたあとは、`ffmpeg-9.0.2-pitatrack1-lgpl-win64.zip` を展開したものでもかまいません。`ffmpeg.exe` と一緒に、同じフォルダーのライセンスのファイルもパッケージに入れます（[license-notice.md](license-notice.md) の「パッケージに入れるファイル」）。
 
 ## GitHub Release に置く
 
 ライセンス表示が指す「ソースの置き場所」は、タグ `ffmpeg-<版>-pitatrack<ビルド番号>` の Release です。Store 版を出す前に作ります。
 
 ```bat
-git tag ffmpeg-9.0.2-pitatrack1
-git push origin ffmpeg-9.0.2-pitatrack1
+git tag ffmpeg-9.0.2-pitatrack2
+git push origin ffmpeg-9.0.2-pitatrack2
 ```
 
 ワークフローがビルドと確認をしてから、次のファイルを置いた Release を作ります。ぴたトラック本体の「最新のリリース」（Latest）は変えません。タグが `ffmpeg-source.env` の版と違うときは止まります。
 
-- `ffmpeg-9.0.2-pitatrack1-lgpl-win64.zip`（artifact の `-lgpl-win64` と同じもの）
+- `ffmpeg-9.0.2-pitatrack2-lgpl-win64.zip`（artifact の `-lgpl-win64` と同じもの）
 - `ffmpeg-9.0.2.tar.xz` と `ffmpeg-9.0.2.tar.xz.asc`（公式のソースと署名。そのまま）
-- `ffmpeg-9.0.2-pitatrack1-build-files.zip`（`BUILD.txt`、`build.sh`、`configure-options.txt` など）
+- `ffmpeg-9.0.2-pitatrack2-build-files.zip`（`BUILD.txt`、`build.sh`、`configure-options.txt` など）
 - `SHA256SUMS.txt`
 
 GitHub はタグの時点のリポジトリのソース（Source code の zip と tar.gz）も Release に付けるので、ビルドに使ったスクリプトはそこにも残ります。
@@ -104,7 +103,7 @@ docker run --rm -v "$PWD:/repo" -w /repo ubuntu:24.04 bash -c "apt-get update &&
 
 ```bat
 python dev\ffmpeg-lgpl\make_test_media.py dist\test-media
-powershell -NoProfile -ExecutionPolicy Bypass -File dev\ffmpeg-lgpl\test_pitatrack_usage.ps1 -FfmpegPath dist\ffmpeg-lgpl\ffmpeg-9.0.2-pitatrack1-lgpl-win64\ffmpeg.exe -MediaDir dist\test-media -OutputDir dist\test-results
+powershell -NoProfile -ExecutionPolicy Bypass -File dev\ffmpeg-lgpl\test_pitatrack_usage.ps1 -FfmpegPath dist\ffmpeg-lgpl\ffmpeg-9.0.2-pitatrack2-lgpl-win64\ffmpeg.exe -MediaDir dist\test-media -OutputDir dist\test-results
 ```
 
 `-UsageOnly` を付けると、ライセンスと部品の確認を飛ばして使い方だけを確かめます。ほかの ffmpeg（gyan.dev のビルドなど）と結果を比べるときに使います。
@@ -116,6 +115,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File dev\ffmpeg-lgpl\test_pitatra
 1. ライセンスと部品: `ffmpeg -version` の版、`-buildconf` に `--enable-gpl`・`--enable-nonfree`・`--enable-version3`・`--enable-lib…` がないこと、`-L` が LGPL 2.1 以降であること、必要な部品があること、エンコーダーが aac と pcm_f32le だけであること
 2. MP4 にまとめる: コピーで遅らせる（`-itsoffset`）、コピーで早める（`-ss`）、ずらさないコピー、AAC で再エンコードして遅らせる（`adelay`）。どれも映像（H.264 のコピー）と、各形式の音声トラックを 1 つの MP4 にまとめ、コーデック、トラック名（`handler_name` と `title`）、音の出だしが動画の音声とそろっていること（許容差 40 ms）を見る
 3. 自動調整: 各形式のファイルを `AudioOffsetAnalyzer.Decode`（`-f f32le` で標準出力へ）で読み、長さと出だしを見る。さらに `Analyze` で、ずれ（0、+600、-1234 ms）を許容差 25 ms で推定できること
+4. ボーカル分離: GUI の `ConvertTo-SeparationWav`（44.1 kHz float ステレオの WAV）、`New-SeparationDerivedTrack`（amerge・pan・alimiter で 元音源 − ステム × k を .m4a に）、`Export-SeparationStem`（ステムを .m4a に）をそのまま呼ぶ。ステムには元音源そのものを使い、オフボーカル（1 と −1）がほぼ無音に、リデュース −8 dB が元の約 40% のピークになること
 
 素材は 30 秒と短いので、テストでは自動調整の探す範囲（`MaxLagSeconds`）を 20 秒にしています。
 
@@ -125,4 +125,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File dev\ffmpeg-lgpl\test_pitatra
 2. プルリクエストを作り、ワークフローが緑になることを確かめる。configure で部品の名前が変わっていれば、build.sh がその名前を示して止まる
 3. まとめた MP4 を MPC-BE などで再生し、遅らせる・早めるの結果を耳で確かめる（コピーで遅らせる方法は、ffmpeg が MP4 に書く編集リストにプレーヤーが従うことが前提）
 4. タグ `ffmpeg-<版>-pitatrack<番号>` を push して Release を作り、ライセンス表示の URL をその Release に変える
-5. `tools\setup.ps1` の `$Script:FfmpegUrl` と `$Script:FfmpegSha256` を、新しい Release の `ffmpeg-<版>-pitatrack<番号>-lgpl-win64.zip` の URL と SHA256（Release の `SHA256SUMS.txt`）に変え、README の Release へのリンクも変える
+5. `tools\setup.ps1` の `$Script:FfmpegUrl` と `$Script:FfmpegSha256` を、新しい Release の `ffmpeg-<版>-pitatrack<番号>-lgpl-win64.zip` の URL と SHA256（Release の `SHA256SUMS.txt`）に変え、README の Release へのリンクも変える。Store 版は `dev\build_msix.ps1` の `$ffmpegVersion`、`$ffmpegRelease`、`$ffmpegFiles`（4 つのファイルの SHA256）と、`msix\store-submission.md` の「追加のライセンス条項」「認定の注記」の URL も変える

@@ -35,3 +35,9 @@
 # adelay: 再エンコードするトラックを遅らせる。aresample: -ar、-ac とサンプル形式の変換。
 # ほかに ffmpeg.exe 自身が aformat、anull、atrim といくつかの映像のフィルターを入れる。
 --enable-filter=adelay,aresample
+
+# ---- ボーカル分離（bs_roformer-cli を呼び、分離したステムから派生トラックを作る） ----
+# wav: bs_roformer-cli に渡す 44.1 kHz float の WAV を書く。ipod: 派生トラックの .m4a（拡張子 .m4a で選ばれるのは mp4 ではなく ipod）。
+--enable-muxer=wav,ipod
+# amerge + pan: 元音源とステムの 2 入力を混ぜて係数を掛ける（mix − stem × k）。alimiter: ピークが 0 dBFS を超えないようにする。
+--enable-filter=amerge,pan,alimiter
