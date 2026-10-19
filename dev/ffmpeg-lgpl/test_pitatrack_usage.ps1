@@ -21,7 +21,8 @@ param(
 #   3. 自動調整の AudioOffsetAnalyzer（-f f32le で標準出力に取り出す）で各形式を読み、ずれを推定する
 #   4. ボーカル分離: ConvertTo-SeparationWav（44.1 kHz float の WAV に変換）、New-SeparationDerivedTrack（amerge・pan・alimiter で
 #      元音源 − ステム × k を .m4a に書く）、Export-SeparationStem（ステムを .m4a に書く）。ステムには元音源そのものを使い、
-#      オフボーカル（1 と −1）がほぼ無音に、リデュース（−8 dB）が元の約 40% になることを見る
+#      オフボーカル（1 と −1）がほぼ無音に、リデュース（−8 dB）が元の約 40% になることを見る。
+#      MP4 の中の AC-3 / E-AC-3 の元音源も変換できることを見る
 # 関数と C# は GUI のスクリプトから読み込むので、GUI を変えればこのテストもそれに従います。
 # ファイル名、フォルダー名、トラック名には日本語と空白を使います。
 
@@ -300,7 +301,7 @@ if (-not $UsageOnly) {
     Add-Result 'ライセンス' '-L' $lgplOk 'GNU Lesser General Public License version 2.1 or later'
 
     $required = [ordered]@{
-        decoders  = @('aac', 'mp3float', 'mp3', 'vorbis', 'opus', 'flac', 'alac', 'pcm_u8', 'pcm_s16le', 'pcm_s24le', 'pcm_s32le', 'pcm_f32le')
+        decoders  = @('aac', 'mp3float', 'mp3', 'vorbis', 'opus', 'flac', 'alac', 'pcm_u8', 'pcm_s16le', 'pcm_s24le', 'pcm_s32le', 'pcm_f32le', 'ac3', 'eac3')
         encoders  = @('aac', 'pcm_f32le')
         demuxers  = @('mov', 'mp4', 'm4a', 'aac', 'mp3', 'wav', 'flac', 'ogg')
         muxers    = @('mp4', 'f32le', 'wav', 'ipod')
@@ -458,6 +459,23 @@ try {
 }
 catch {
     Add-Result 'ボーカル分離' '変換（pcm_f32le、44100 Hz、ステレオの WAV）' $false $_.Exception.GetBaseException().Message
+}
+
+# MP4 の中の AC-3 / E-AC-3 の元音源も、同じ変換で 44.1 kHz float の WAV にできること
+foreach ($file in @($files | Where-Object { $_.Codec -eq 'ac3' -or $_.Codec -eq 'eac3' })) {
+    $wavPath = Join-Path $separationDir ([System.IO.Path]::GetFileNameWithoutExtension($file.Name) + '.wav')
+    try {
+        ConvertTo-SeparationWav -FfmpegPath $FfmpegPath -SourceFile $file.Path -OutputPath $wavPath -LogPath $separationLog -State $null
+        $info = (Invoke-TestFfmpeg -Arguments @('-hide_banner', '-nostdin', '-i', $wavPath)).Error
+        $audioLine = (($info -split "`r?`n") | Where-Object { $_ -match 'Audio:' } | Select-Object -First 1)
+        $samples = [AudioOffsetAnalyzer]::Decode($FfmpegPath, $wavPath)
+        $onset = [PitaTrackFfmpegTest.Ffmpeg]::FindOnset($samples, [AudioOffsetAnalyzer]::SampleRate, 0.1)
+        $ok = ($audioLine -match 'pcm_f32le') -and ($audioLine -match '44100 Hz') -and [Math]::Abs($onset - $file.Start) * 1000 -le $onsetToleranceMs
+        Add-Result 'ボーカル分離' ('変換: ' + $file.Name) $ok ('{0} / 出だし {1}（{2} のはず）' -f $audioLine.Trim(), (Format-Ms $onset), (Format-Ms $file.Start))
+    }
+    catch {
+        Add-Result 'ボーカル分離' ('変換: ' + $file.Name) $false $_.Exception.GetBaseException().Message
+    }
 }
 
 if ($mixPeak -gt 0.05) {

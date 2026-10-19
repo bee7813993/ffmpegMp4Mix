@@ -41,3 +41,10 @@
 --enable-muxer=wav,ipod
 # amerge + pan: 元音源とステムの 2 入力を混ぜて係数を掛ける（mix − stem × k）。alimiter: ピークが 0 dBFS を超えないようにする。
 --enable-filter=amerge,pan,alimiter
+
+# ---- MP4 の中の AC-3 / E-AC-3（テレビ録画や Blu-ray 由来の音声）を自動調整とボーカル分離の対象にする ----
+# どちらも FFmpeg 本体の LGPL の実装で、GPL への依存はない。AC-3 の特許は 2017 年に、E-AC-3 の最後の特許は 2026 年 1 月に失効したと
+# 報じられている。DTS は、dca デコーダーが特許の残る DTS-HD の拡張も含むので入れない。
+# ac3 のパーサーは ac3 デコーダーが自動で選ぶが、build.sh の確認のために書いておく。
+--enable-decoder=ac3,eac3
+--enable-parser=ac3
