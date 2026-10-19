@@ -35,7 +35,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File dev\build_msix.ps1
 
 - `dist\PitaTrack_<版>_x64.msix` ができます。署名は不要です（Store が署名します）。
 - 版は `tools\setup.ps1` の `$Script:AppVersion`（例: 2.1.0 → 2.1.0.0）です。**提出するたびに、前に出したものより大きい版が必要**なので、更新のときは `$Script:AppVersion` を上げます（ZIP 版の版も一緒に上がります）。
-- 同梱の ffmpeg は、`build_msix.ps1` に書いた LGPL 版の Release（今は `ffmpeg-9.0.2-pitatrack1`）です。ffmpeg の版を上げたときは、下の「追加のライセンス条項」の URL も変えます。
+- 同梱の ffmpeg は、`build_msix.ps1` に書いた LGPL 版の Release（今は `ffmpeg-9.0.2-pitatrack1`）です。ffmpeg の版を上げたときは、下の「追加のライセンス条項」と「認定の注記」の URL も変えます。**ボーカル分離を入れた版は `ffmpeg-9.0.2-pitatrack2` 以降の ffmpeg が必要**です（wav・ipod のマルチプレクサーと amerge・pan・alimiter のフィルター）。その Release を作って `build_msix.ps1` を更新してから提出します。
+- 同梱のボーカル分離エンジン BSRoformer.cpp は、`tools\mixtrack_ffmpeg_gui.ps1` の `$Script:BsRoformerUrl` の版（今は v0.1.0 の Windows Vulkan 版）です。これでパッケージは約 36 MB になります（ffmpeg だけのときは約 14 MB）。分離モデルはパッケージに入れず、アプリが初めて使うときにダウンロードします。
 - 手元での確認（任意）: 開発者モードで `-Register -DevIdentity` を付けて登録し、右クリック、GUI、CLI、「設定 → ライセンス」を試します。そのあと `Get-AppxPackage PitaTrack.Dev | Remove-AppxPackage` で外します。`-DevIdentity` を付けずに `-Register` すると Store の ID で登録され、同じ PC に Store から入れるときにぶつかります。
 
 ## 3. 提出（Partner Center の「提出の開始」）
@@ -55,7 +56,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File dev\build_msix.ps1
 | 欄 | 内容 |
 |---|---|
 | カテゴリ（Category） | 写真とビデオ（Photo & video）。音楽（Music）でもよい |
-| プライバシー ポリシーの URL | ぴたトラックは個人情報を集めず、ネットに送りもしないので必須ではない。求められたら、GitHub に「個人情報を集めない」ことを書いたページを作って入れる |
+| プライバシー ポリシーの URL | ぴたトラックは個人情報を集めません。ボーカル分離のモデルを初めて使うときに GitHub からダウンロードするためインターネットに接続しますが、送るのはダウンロードの要求だけです。プライバシー ポリシーのページには「モデルのダウンロードで GitHub に接続する。個人情報は送らない」ことを書いておきます |
 | Web サイト | https://github.com/bee7813993/ffmpegMp4Mix |
 | サポートの連絡先 | https://github.com/bee7813993/ffmpegMp4Mix/issues |
 | システム要件 | 特になし（キーボードとマウスで操作） |
@@ -78,10 +79,12 @@ IARC の質問票に答えます。ゲームではないアプリで、暴力や
 
 エクスプローラーで動画と音声ファイルを選んで右クリックし、「ぴたトラックでまとめる」を選ぶだけで始められます。音声のずれは、動画の音声と比べて自動で合わせられます。
 
+ボーカル分離の機能では、1 つの音源からオフボーカル、ボーカルリデュース、コーラス入りオフボーカルのトラックを作れます。分離に使うモデル（約 300 MB）は、初めて使うときにインターネットからダウンロードします。Vulkan に対応した GPU があると速く処理できます。
+
 動作環境: Windows 10 バージョン 2004 以降、Windows 11（x64）。Windows に入っている PowerShell を使うため、S モードの Windows では動きません。
 読み込めるファイル: 動画は MP4。音声は MP4、M4A、AAC、MP3、WAV、FLAC、OGG。
 
-このアプリは、LGPLv2.1 でライセンスされた FFmpeg のコードを使っています。ソースの入手先は「追加のライセンス条項」をご覧ください。
+このアプリは、LGPLv2.1 でライセンスされた FFmpeg のコードを使っています。ボーカル分離のエンジン BSRoformer.cpp と ggml（MIT License）も含まれています。ソースの入手先は「追加のライセンス条項」をご覧ください。
 ```
 
 **製品の機能（Product features）**（1 つ 200 文字まで、最大 20 個）
@@ -93,17 +96,18 @@ IARC の質問票に答えます。ゲームではないアプリで、暴力や
 トラックごとに、音声を早める・遅らせる（ミリ秒単位）
 トラック名の候補と、トラック数ごとの初期値を保存
 画面を使わずに素早く済ませる CLI 版（右クリックの「ぴたトラック (CLI版) でまとめる」）
+1 つの音源からオフボーカル／ボーカルリデュース／コーラス入りオフボーカルのトラックを作る（ボーカル分離。モデルは初回にダウンロード）
 ```
 
 **スクリーンショット（Screenshots）**: 1 の 3 で用意したもの。
 
 **このバージョンの新機能（What's new）**: 初回の提出では空欄。
 
-**キーワード（Search terms）の例**: 音声トラック、MP4、オフボーカル、カラオケ、トラック名、ffmpeg
+**キーワード（Search terms）の例**: 音声トラック、MP4、オフボーカル、カラオケ、トラック名、ffmpeg、ボーカル分離
 
 **著作権と商標の情報（Copyright and trademark info）**: `© bee7813993`
 
-**追加のライセンス条項（Additional license terms）**: 次をそのまま入れます（`dev\ffmpeg-lgpl\license-notice.md` の 2 と同じ。ffmpeg の版を上げたら両方の URL を変える）。
+**追加のライセンス条項（Additional license terms）**: 次をそのまま入れます（FFmpeg の部分は `dev\ffmpeg-lgpl\license-notice.md` の 2 と同じ。ffmpeg の版を上げたら両方の URL を変える。モデルを足した・替えたら Release の URL を変える）。
 
 ```text
 ぴたトラックは Apache License 2.0 で提供します（https://github.com/bee7813993/ffmpegMp4Mix/blob/main/LICENSE）。
@@ -116,6 +120,9 @@ FFmpeg は GNU Lesser General Public License version 2.1 以降のライセン�
 この条項は、LGPL が利用者に認める権利（FFmpeg を改変すること、その改変のデバッグのためにリバースエンジニアリングすることを含む）を制限しません。
 FFmpeg は FFmpeg プロジェクトの創始者 Fabrice Bellard の商標です。
 
+このアプリには、ボーカル分離のエンジンとして BSRoformer.cpp（https://github.com/chenmozhijin/BSRoformer.cpp）と ggml（https://github.com/ggml-org/ggml）が入っています。どちらも MIT License で提供されており、ライセンス文はアプリの「設定 → ライセンス」で見られます。
+ボーカル分離のモデル（Kim Mel-Roformer: MIT License、BS-Roformer Karaoke anvuew: GNU General Public License version 3）はこのアプリには含まれず、初めて使うときに https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/separation-models-20261019 からダウンロードします。各モデルのライセンス文は、モデルと同じフォルダーに置かれます。
+
 PitaTrack is provided under the Apache License 2.0 (https://github.com/bee7813993/ffmpegMp4Mix/blob/main/LICENSE).
 
 This app includes ffmpeg.exe from the FFmpeg project (https://ffmpeg.org/).
@@ -125,6 +132,9 @@ FFmpeg is licensed under the GNU Lesser General Public License version 2.1 or la
 The provider of PitaTrack does not own FFmpeg. FFmpeg is copyrighted by its authors (see https://ffmpeg.org/ and the source).
 Nothing in these terms restricts the rights the LGPL gives you, including the right to modify FFmpeg and to reverse engineer for debugging such modifications.
 FFmpeg is a trademark of Fabrice Bellard, originator of the FFmpeg project.
+
+This app includes BSRoformer.cpp (https://github.com/chenmozhijin/BSRoformer.cpp) and ggml (https://github.com/ggml-org/ggml) as the vocal separation engine. Both are provided under the MIT License; the license texts are shown under "設定 → ライセンス" (Settings → License) in the app.
+The vocal separation models (Kim Mel-Roformer: MIT License; BS-Roformer Karaoke anvuew: GNU General Public License version 3) are not included in this app. They are downloaded on first use from https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/separation-models-20261019, and each model's license text is placed next to it.
 ```
 
 **開発者（Developed by）**: bee7813993
@@ -134,7 +144,7 @@ FFmpeg is a trademark of Fabrice Bellard, originator of the FFmpeg project.
 **制限付き機能（Restricted capabilities）: runFullTrust の説明**（認定の担当者向けなので英語）
 
 ```text
-PitaTrack is a Win32 desktop app. Its UI is a Windows Forms app written in Windows PowerShell and started by PitaTrack.exe. It needs runFullTrust to run as a full-trust desktop process, to start the in-box Windows PowerShell and the bundled ffmpeg.exe as child processes, to read the video and audio files the user selects, and to write the merged MP4 next to them. The File Explorer context menu (an IExplorerCommand in PitaTrackShell.dll, registered with com:SurrogateServer) also requires full trust. The app does not download or run any code from the internet.
+PitaTrack is a Win32 desktop app. Its UI is a Windows Forms app written in Windows PowerShell and started by PitaTrack.exe. It needs runFullTrust to run as a full-trust desktop process, to start the in-box Windows PowerShell and the bundled ffmpeg.exe as child processes, to read the video and audio files the user selects, and to write the merged MP4 next to them. The File Explorer context menu (an IExplorerCommand in PitaTrackShell.dll, registered with com:SurrogateServer) also requires full trust. The app does not download or run any executable code from the internet. The vocal separation feature downloads only data files (GGUF model weights, about 300 MB in total) from GitHub Releases on first use; the separation engine itself (tools\bsroformer\bs_roformer-cli.exe, BSRoformer.cpp, MIT) is bundled in the package and started as a child process.
 ```
 
 **認定の注記（Notes for certification）**（英語）
@@ -144,8 +154,10 @@ How to test:
 1. In File Explorer, select an MP4 video and one or more audio files (M4A, MP3, WAV or FLAC) together, right-click and choose "ぴたトラックでまとめる" (PitaTrack). If the menu item does not appear right after installation, restart File Explorer. You can also start PitaTrack from the Start menu and drag the files into its window.
 2. Optionally click "自動調整" (auto-adjust), then click "保存" (save). The merged MP4 is written next to the video as <video name>_mixed.mp4.
 3. "設定" (settings) > "ライセンス" (license) shows the license notices.
+4. Vocal separation (optional; needs an internet connection): with the video loaded, check "元動画の音声を1トラック目に使用", select that row, click "ボーカル分離" and then "実行". The app asks to download the model (about 240 MB) from GitHub Releases; answer "はい". The separated tracks are listed with a preview. A Vulkan-capable GPU makes it fast; on a CPU it takes several minutes.
 The UI is in Japanese only. The app uses the in-box Windows PowerShell 5.1, so it does not run on Windows in S mode; it shows a message in that case.
 ffmpeg.exe is FFmpeg 9.0.2 built with LGPL components only. Its license text and source code are included in the package under licenses\FFmpeg and are also available at https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack1.
+tools\bsroformer\bs_roformer-cli.exe and ggml*.dll are the unmodified Windows (Vulkan) build of BSRoformer.cpp v0.1.0 (MIT) from https://github.com/chenmozhijin/BSRoformer.cpp/releases/tag/v0.1.0; their license texts are under licenses\BSRoformer.cpp. They use the Microsoft Visual C++ runtime, declared as a dependency on Microsoft.VCLibs.140.00.UWPDesktop.
 ```
 
 担当者向けの試験用の動画と音声を GitHub の Release などに置いた場合は、その URL も書き足します。
@@ -162,7 +174,8 @@ ffmpeg.exe is FFmpeg 9.0.2 built with LGPL components only. Its license text and
    - エクスプローラーを再起動しなくても右クリックに項目が出るか（出なければ再起動して出るか）
    - GUI 版で自動調整と MP4 の保存までできるか
    - CLI 版で MP4 ができるか
-   - 「設定 → ライセンス」の表示
+   - 「設定 → ライセンス」の表示（BSRoformer.cpp とモデルの項も出るか）
+   - ボーカル分離（モデルのダウンロードと分離。GPU のない仮想マシンでは CPU で動くので数分かかる）。モデルが `%LOCALAPPDATA%\PitaTrack\models` と `%LOCALAPPDATA%\Packages\<パッケージ>\LocalCache\Local\PitaTrack\models` のどちらに落ちたか、「モデルフォルダーを開く」がその場所を開くかも見る（開発者モードで登録した版では前者だった）
 4. 仮想マシンの管理者の PowerShell で次を実行し、何かブロックされていないかを見ます。
 
    ```powershell
@@ -179,6 +192,8 @@ ffmpeg.exe is FFmpeg 9.0.2 built with LGPL components only. Its license text and
   - 「追加のライセンス条項」と `dev\ffmpeg-lgpl\license-notice.md` の URL（パッケージの `licenses\README.txt` の版と URL は、`build_msix.ps1` が自動で入れる）
 
   あわせて、遅らせる・早める結果を MPC-BE で聞いて確かめます。
+- **分離エンジン（BSRoformer.cpp）の版を上げたとき:** `tools\mixtrack_ffmpeg_gui.ps1` の `$Script:BsRoformerUrl` と `$Script:BsRoformerSha256` を変えます（`build_msix.ps1` はそこから読む）。LICENSE が変わっていれば `build_msix.ps1` の `$bsroformerLicenseFiles` の SHA256 も変えます。「追加のライセンス条項」と「認定の注記」の版の表記も直します。
+- **分離モデルを足した・替えたとき:** `tools\mixtrack_ffmpeg_gui.ps1` の `$Script:SeparationModels` と `$Script:SeparationModelsReleaseUrl`、`msix\licenses-README.txt` のモデルの一覧、「追加のライセンス条項」の Release の URL を変えます。
 
 ## 参考
 

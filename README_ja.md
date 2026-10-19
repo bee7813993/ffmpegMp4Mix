@@ -278,7 +278,7 @@ ZIP版では、デスクトップの「ぴたトラック」に、動画ファ�
 - 出力は元のファイルと同じフォルダーに m4a で保存します（`<元の名前>_offvocal_kim.m4a` など）。
 - **全モデルで候補を作る** にチェックを付けると、入っている全モデルで1トラックずつ作ります。曲によって向くモデルが違うので、聴き比べて選べます。
 - 処理には GPU を使います（Vulkan に対応した NVIDIA / AMD / Intel）。GPU がない PC でも動きますが、1モデルあたり数分〜十数分かかります。
-- モデルは `%LOCALAPPDATA%\PitaTrack\models` に置かれます（Store版は、設定と同じくアプリ専用の場所 `%LOCALAPPDATA%\Packages\` の下に置かれ、アンインストールすると消えます）。**モデルフォルダーを開く** でこのフォルダーが開き、BSRoformer.cpp 用の GGUF 形式のモデル（BS-Roformer / Mel-Band Roformer 系）を自分で置くこともできます。同じ名前の `.json` に `{"label": "表示名", "short": "短い名前", "role": "vocals または lead"}` を書くと、表示名・トラック名の `{model}` に使う短い名前・用途を指定できます。
+- モデルは `%LOCALAPPDATA%\PitaTrack\models` に置かれます（Store版では、設定と同じく Windows がアプリ専用の場所 `%LOCALAPPDATA%\Packages\` の下に振り替えることがあり、その場合はアンインストールすると消えます）。どちらに置かれていても **モデルフォルダーを開く** でそのフォルダーが開き、BSRoformer.cpp 用の GGUF 形式のモデル（BS-Roformer / Mel-Band Roformer 系）を自分で置くこともできます。同じ名前の `.json` に `{"label": "表示名", "short": "短い名前", "role": "vocals または lead"}` を書くと、表示名・トラック名の `{model}` に使う短い名前・用途を指定できます。
 
 標準のモデルは次の2つです。ダウンロード時にライセンス文（`*.LICENSE.txt`）も同じフォルダーに置かれます。
 

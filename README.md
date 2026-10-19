@@ -278,7 +278,7 @@ From one audio track you can create an **off-vocal** track (vocals removed), a *
 - Output files are m4a next to the source file (`<name>_offvocal_kim.m4a` and so on).
 - **全モデルで候補を作る** makes one track per installed model so you can compare them; the best model depends on the song.
 - A GPU (NVIDIA / AMD / Intel with Vulkan) is used when available. Without one it still works, but takes minutes to tens of minutes per model.
-- Models are stored in `%LOCALAPPDATA%\PitaTrack\models` (the Store version keeps them, like its settings, in an app-specific location under `%LOCALAPPDATA%\Packages\`, which is removed on uninstall). **モデルフォルダーを開く** opens that folder, and you can add your own GGUF models for BSRoformer.cpp (BS-Roformer / Mel-Band Roformer). An optional `.json` with the same name (`{"label": "display name", "short": "short name", "role": "vocals" or "lead"}`) sets the display name, the short name used for `{model}` in track names, and the role.
+- Models are stored in `%LOCALAPPDATA%\PitaTrack\models` (in the Store version, Windows may redirect them, like the settings, to an app-specific location under `%LOCALAPPDATA%\Packages\`, which is then removed on uninstall). Wherever they are, **モデルフォルダーを開く** opens that folder, and you can add your own GGUF models for BSRoformer.cpp (BS-Roformer / Mel-Band Roformer). An optional `.json` with the same name (`{"label": "display name", "short": "short name", "role": "vocals" or "lead"}`) sets the display name, the short name used for `{model}` in track names, and the role.
 
 The default models are the following two. Their license texts (`*.LICENSE.txt`) are downloaded next to them.
 

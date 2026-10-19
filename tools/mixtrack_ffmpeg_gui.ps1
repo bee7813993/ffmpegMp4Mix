@@ -27,7 +27,12 @@ $Script:ConfigFallbackPaths = @()
 # Store 版（MSIX）はインストール先に書き込めないため、起動用の PitaTrack.exe が PITATRACK_PACKAGED=1 を渡す。
 # 設定は %LOCALAPPDATA%\PitaTrack に保存する（実体は Windows がパッケージ専用の場所に振り替え、アンインストールで消える）。
 # まだ保存していなければ、ZIP 版でインストールしたときの設定、なければ同梱の初期設定を読む。
-if ($env:PITATRACK_PACKAGED -eq '1') {
+$Script:Packaged = ($env:PITATRACK_PACKAGED -eq '1')
+# パッケージ ファミリー名（Store 版だけ。Get-PackageFamilyName が初めて使うときに入れる）
+$Script:PackageFamilyName = $null
+# モデルフォルダーの実パス（Get-SeparationModelsRealDir が初めて調べたときに入れる）
+$Script:SeparationModelsRealDir = $null
+if ($Script:Packaged) {
     $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
     $Script:ConfigFallbackPaths = @(
         (Join-Path $localAppData 'Programs\PitaTrack\tools\mixtrack_ffmpeg_gui.settings.json'),
@@ -1807,9 +1812,70 @@ function Get-BsRoformerCliPath {
 }
 
 # モデル（GGUF）の置き場。インストール先が読み取り専用（Store 版）でも使えるようにユーザーのフォルダーに置く。
-# 自分で探してきたモデルもここに置けば一覧に出る
+# 自分で探してきたモデルもここに置けば一覧に出る。
+# Store 版では、Windows がこのフォルダーへの読み書きをパッケージ専用の場所（LocalCache）に振り替える（設定ファイルと同じ）
 function Get-SeparationModelsDir {
     return Join-Path $env:LOCALAPPDATA 'PitaTrack\models'
+}
+
+# Store 版（パッケージの中）で動いているときのパッケージ ファミリー名。パッケージの外なら $null
+function Get-PackageFamilyName {
+    if ($null -eq $Script:PackageFamilyName) {
+        $name = ''
+        if ($Script:Packaged) {
+            try {
+                $name = [string][PitaTrackPackage]::GetFamilyName()
+            }
+            catch {
+                $name = ''
+            }
+        }
+        $Script:PackageFamilyName = $name
+    }
+    if ([string]::IsNullOrEmpty($Script:PackageFamilyName)) {
+        return $null
+    }
+    return $Script:PackageFamilyName
+}
+
+# ユーザーに見せる・エクスプローラーで開くモデルフォルダーの実パス（フォルダーも作る）。
+# Store 版では、Windows が Get-SeparationModelsDir への読み書きをパッケージ専用の場所
+# （%LOCALAPPDATA%\Packages\<パッケージ>\LocalCache\Local\PitaTrack\models）に振り替えることがある。エクスプローラーは
+# パッケージの外で動くので、振り替えられているときに元のパスを渡すと、振り替え前の（空の）フォルダーが開いてしまう。
+# 振り替えの有無は Windows の入れ方で変わる（開発者モードで登録した署名なしのパッケージでは振り替えられなかった）ので、
+# 小さなファイルを書いてどちらに落ちたかで判断する
+function Get-SeparationModelsRealDir {
+    $modelsDir = Get-SeparationModelsDir
+    $familyName = Get-PackageFamilyName
+    if ([string]::IsNullOrEmpty($familyName)) {
+        return $modelsDir
+    }
+    if ($null -ne $Script:SeparationModelsRealDir) {
+        return $Script:SeparationModelsRealDir
+    }
+
+    $result = $modelsDir
+    try {
+        if (-not (Test-Path -LiteralPath $modelsDir -PathType Container)) {
+            New-Item -ItemType Directory -Path $modelsDir -Force | Out-Null
+        }
+        $markerName = '.pitatrack_' + [guid]::NewGuid().ToString('N')
+        $marker = Join-Path $modelsDir $markerName
+        [System.IO.File]::WriteAllText($marker, '')
+        try {
+            $redirectedDir = Join-Path $env:LOCALAPPDATA ('Packages\' + $familyName + '\LocalCache\Local\PitaTrack\models')
+            if (Test-Path -LiteralPath (Join-Path $redirectedDir $markerName) -PathType Leaf) {
+                $result = $redirectedDir
+            }
+        }
+        finally {
+            Remove-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue
+        }
+    }
+    catch {
+    }
+    $Script:SeparationModelsRealDir = $result
+    return $result
 }
 
 # モデルと同名の .json があれば表示名などを読む。
@@ -2209,7 +2275,9 @@ function Install-BsRoformer {
     }
 }
 
-# bs_roformer-cli.exe がなければダウンロードするか尋ねる。断られたら $null
+# bs_roformer-cli.exe がなければダウンロードするか尋ねる。断られたら $null。
+# Store 版は dev\build_msix.ps1 がエンジンを同梱するのでダウンロードしない（Store の規約で実行ファイルをあとから
+# ダウンロードできず、インストール先にも書き込めないため）。それでもなければ、その旨を伝えて止める
 function Request-BsRoformer {
     param(
         [System.Windows.Forms.IWin32Window]$Owner,
@@ -2220,6 +2288,10 @@ function Request-BsRoformer {
     $cliPath = Get-BsRoformerCliPath
     if (Test-Path -LiteralPath $cliPath -PathType Leaf) {
         return $cliPath
+    }
+
+    if ($Script:Packaged) {
+        throw ("この版のぴたトラックには、ボーカル分離のエンジン（BSRoformer.cpp）が入っていません。`r`n{0}`r`n`r`nStore 版はエンジンをあとからダウンロードできません。Microsoft Store からぴたトラックを入れ直してください。" -f $cliPath)
     }
 
     $message = "ボーカル分離には BSRoformer.cpp（{0}）が必要です。ダウンロードしますか？`r`n`r`n{1}`r`n→ {2}" -f $Script:BsRoformerSizeText, $Script:BsRoformerUrl, (Get-BsRoformerDir)
@@ -2296,7 +2368,7 @@ function Request-SeparationModel {
         throw ("分離モデルがありません。`r`n{0}`r`n`r`n{1} の GGUF ファイルをこの場所に置いてください。" -f $Model.Path, $Model.Label)
     }
 
-    $message = "モデル「{0}」（{1}）がまだありません。ダウンロードしますか？`r`n`r`n作者: {2}`r`nライセンス: {3}`r`n元のモデル: {4}`r`n`r`n{5}`r`n→ {6}" -f $Model.Label, $Model.SizeText, $Model.Author, $Model.License, $Model.Source, $Model.Url, (Get-SeparationModelsDir)
+    $message = "モデル「{0}」（{1}）がまだありません。ダウンロードしますか？`r`n`r`n作者: {2}`r`nライセンス: {3}`r`n元のモデル: {4}`r`n`r`n{5}`r`n→ {6}" -f $Model.Label, $Model.SizeText, $Model.Author, $Model.License, $Model.Source, $Model.Url, (Get-SeparationModelsRealDir)
     $answer = [System.Windows.Forms.MessageBox]::Show(
         $Owner,
         $message,
@@ -2603,7 +2675,7 @@ function Invoke-Separation {
     $kinds = @(Get-SeparationKinds -Request $Request -Models $models)
     if ($kinds.Count -eq 0) {
         if ($Request.AllCandidates -and ($Request.VocalCut -or $Request.Karaoke)) {
-            throw ("候補になるモデルがありません。`r`n{0} に GGUF ファイルを置いてください。" -f (Get-SeparationModelsDir))
+            throw ("候補になるモデルがありません。`r`n{0} に GGUF ファイルを置いてください。" -f (Get-SeparationModelsRealDir))
         }
         throw '作るトラックを選んでください。'
     }
@@ -3659,15 +3731,16 @@ function Show-SeparationDialog {
     }
 
     $openModelsButton.Add_Click({
-        $modelsDir = Get-SeparationModelsDir
+        # Store 版で書き込みが振り替えられているときは、エクスプローラーにその実パスを渡す（フォルダーもそこで作られる）
+        $openDir = Get-SeparationModelsRealDir
         try {
-            if (-not (Test-Path -LiteralPath $modelsDir -PathType Container)) {
-                New-Item -ItemType Directory -Path $modelsDir -Force | Out-Null
+            if (-not (Test-Path -LiteralPath $openDir -PathType Container)) {
+                New-Item -ItemType Directory -Path $openDir -Force | Out-Null
             }
-            Start-Process -FilePath 'explorer.exe' -ArgumentList (ConvertTo-CommandLineArgument $modelsDir)
+            Start-Process -FilePath 'explorer.exe' -ArgumentList (ConvertTo-CommandLineArgument $openDir)
         }
         catch {
-            Show-ErrorMessage ("フォルダーを開けませんでした。`r`n" + $modelsDir + "`r`n" + $_.Exception.GetBaseException().Message)
+            Show-ErrorMessage ("フォルダーを開けませんでした。`r`n" + $openDir + "`r`n" + $_.Exception.GetBaseException().Message)
         }
     })
 
@@ -3688,11 +3761,11 @@ function Show-SeparationDialog {
         $leadModel = & $getSelectedKey $leadModelCombo $modelState.LeadKeys
         $needsVocal = $cutCheck.Checked -or $reduceCheck.Checked -or $vocalsCheck.Checked -or ($karaokeCheck.Checked -and $twoStageCheck.Checked)
         if ($needsVocal -and [string]::IsNullOrEmpty($vocalModel)) {
-            Show-ErrorMessage "ボーカルのモデルがありません。`r`n$(Get-SeparationModelsDir) に GGUF ファイルを置いてください。"
+            Show-ErrorMessage "ボーカルのモデルがありません。`r`n$(Get-SeparationModelsRealDir) に GGUF ファイルを置いてください。"
             return
         }
         if ($karaokeCheck.Checked -and [string]::IsNullOrEmpty($leadModel)) {
-            Show-ErrorMessage "リードボーカルのモデルがありません。`r`n$(Get-SeparationModelsDir) に GGUF ファイルを置いてください。"
+            Show-ErrorMessage "リードボーカルのモデルがありません。`r`n$(Get-SeparationModelsRealDir) に GGUF ファイルを置いてください。"
             return
         }
 
@@ -5963,8 +6036,34 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
+
+// Store 版（MSIX）のパッケージ ファミリー名を取る。設定やモデルの振り替え先（LocalCache）のフォルダー名に使う
+public static class PitaTrackPackage
+{
+    const int ERROR_INSUFFICIENT_BUFFER = 122;
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    static extern int GetCurrentPackageFamilyName(ref int packageFamilyNameLength, StringBuilder packageFamilyName);
+
+    // パッケージの中で動いていなければ null
+    public static string GetFamilyName()
+    {
+        int length = 0;
+        if (GetCurrentPackageFamilyName(ref length, null) != ERROR_INSUFFICIENT_BUFFER || length <= 0)
+        {
+            return null;
+        }
+        StringBuilder name = new StringBuilder(length);
+        if (GetCurrentPackageFamilyName(ref length, name) != 0)
+        {
+            return null;
+        }
+        return name.ToString();
+    }
+}
 
 public class TrackTabEventArgs : EventArgs
 {

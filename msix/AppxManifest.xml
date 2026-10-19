@@ -22,6 +22,9 @@
 
   <Dependencies>
     <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+    <!-- ボーカル分離のエンジン（tools\bsroformer の bs_roformer-cli.exe と ggml の dll）が使う Visual C++ ランタイム
+         （msvcp140 / vcruntime140 / vcomp140）。Store に出すと Store が一緒に入れる。この PC に -Register するときは入っている必要がある -->
+    <PackageDependency Name="Microsoft.VCLibs.140.00.UWPDesktop" MinVersion="14.0.30704.0" Publisher="CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" />
   </Dependencies>
 
   <Resources>
