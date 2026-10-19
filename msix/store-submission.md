@@ -147,10 +147,10 @@ The vocal separation models (Kim Mel-Roformer: MIT License; BS-Roformer Karaoke 
 
 ### 3-6. 提出オプション（Submission options）
 
-**制限付き機能（Restricted capabilities）: runFullTrust の説明**（認定の担当者向けなので英語）
+**制限付き機能（Restricted capabilities）: runFullTrust の説明**（認定の担当者向けなので英語。欄は 500 文字まで。下は 464 文字）
 
 ```text
-PitaTrack is a Win32 desktop app. Its UI is a Windows Forms app written in Windows PowerShell and started by PitaTrack.exe. It needs runFullTrust to run as a full-trust desktop process, to start the in-box Windows PowerShell and the bundled ffmpeg.exe as child processes, to read the video and audio files the user selects, and to write the merged MP4 next to them. The File Explorer context menu (an IExplorerCommand in PitaTrackShell.dll, registered with com:SurrogateServer) also requires full trust. The app does not download or run any executable code from the internet. The vocal separation feature downloads only data files (GGUF model weights, about 300 MB in total) from GitHub Releases on first use; the separation engine itself (tools\bsroformer\bs_roformer-cli.exe, BSRoformer.cpp, MIT) is bundled in the package and started as a child process.
+PitaTrack is a Win32 desktop app: a Windows Forms UI in Windows PowerShell, started by PitaTrack.exe. runFullTrust lets it start PowerShell and the bundled ffmpeg.exe and vocal separation engine (bs_roformer-cli.exe) as child processes, read the files the user selects and write the results next to them. The Explorer context menu (PitaTrackShell.dll, com:SurrogateServer) also needs full trust. No code is downloaded; only model data files, after the user agrees.
 ```
 
 **認定の注記（Notes for certification）**（英語）
