@@ -23,6 +23,7 @@ GUI only:
 - Add, delete, and reorder tracks
 - Swap the main video with an `.mp4` file in the audio tracks
 - Auto-adjust each track's offset by comparing it with the video's audio
+- Create off-vocal, vocal-reduced, and karaoke (backing vocals kept) tracks from one audio track (vocal separation; the models are downloaded on first use)
 
 Features under `GUI only` are available only in the GUI. The CLI uses file order and interactive prompts instead.
 
@@ -66,6 +67,7 @@ PitaTrack\
   tools\
     ffmpeg.exe               Downloaded by setup or on first launch
     ffmpeg-licenses\         ffmpeg license and source location (downloaded with ffmpeg.exe)
+    bsroformer\              Vocal separation engine (BSRoformer.cpp; downloaded on first use)
     mixtrack_ffmpeg_gui.ps1
     mixtrack_ffmpeg_gui.settings.json
     pitatrack.ico            Icon
@@ -83,6 +85,7 @@ PitaTrack\
 - Store version: Windows 10 version 2004 or later, or Windows 11 (x64). ffmpeg is included.
 - ZIP version: Windows 10 or Windows 11, PowerShell 5.x, and `ffmpeg.exe` (downloaded automatically by setup)
 - Both use the PowerShell built into Windows, so they do not run on Windows in S mode.
+- For vocal separation, a GPU with Vulkan (NVIDIA / AMD / Intel) makes it much faster. It also works without one, but takes minutes to tens of minutes per model.
 
 ## Installation
 
@@ -94,6 +97,7 @@ PitaTrack\
 That's all.
 
 - `ffmpeg`, which is needed to create MP4 files, is included. Nothing else needs to be downloaded.
+- The vocal separation engine is included too. Its models are downloaded on first use.
 - It works on PCs where Windows 11 **Smart App Control** is on.
 - New versions arrive automatically from the Microsoft Store.
 - Select video or audio files and right-click them to see "ぴたトラックでまとめる" (GUI) and "ぴたトラック (CLI版) でまとめる" (CLI). You can also open "ぴたトラック" from the Start menu.
@@ -113,6 +117,7 @@ Use the ZIP version on PCs that cannot use the Microsoft Store, or to use PitaTr
 That's all.
 
 - `ffmpeg`, which is needed to create MP4 files, is downloaded automatically (about 2 MB). You do not need to get it yourself.
+- The vocal separation engine (about 22 MB) and its models are downloaded on first use.
 - No administrator rights are needed. The tool is installed to `%LOCALAPPDATA%\Programs\PitaTrack`.
 - "ぴたトラック" is added to **Send To**, the desktop, and the Start menu. You can choose which ones in the setup window.
 - After installation, you can delete the extracted folder and the ZIP file.
@@ -134,7 +139,7 @@ Follow the same steps with the ZIP of the new version. The window says it will u
 
 In Windows **Settings → Apps → Installed apps** (Windows 10: **Settings → Apps → Apps & features**), select "ぴたトラック" and choose **Uninstall**.
 
-The shortcuts, Send To entries, settings, and `ffmpeg.exe` are also removed.
+The shortcuts, Send To entries, settings, and `ffmpeg.exe` are also removed. The vocal separation models (`%LOCALAPPDATA%\PitaTrack\models`) are kept; delete them if you no longer need them.
 
 ### Using Without Installing
 
@@ -260,6 +265,30 @@ Press **自動調整** (auto-adjust) to compare each track with the video's audi
 - The **種類** (type) column in the track list shows each file's extension, such as `MP4` or `M4A`, so you can see which tracks are `.mp4`. The source video's audio is shown as `元動画`.
 - The **入力ファイル** (input file) column shows only the file name. Hover over it to see the full path.
 
+### Vocal Separation (Off-Vocal and More)
+
+From one audio track you can create an **off-vocal** track (vocals removed), a **vocal-reduced** track, and a **karaoke** track that removes only the lead vocal and keeps the backing vocals.
+
+1. Add the source audio as a track (**+ 追加**, drag and drop, or **元動画の音声を1トラック目に使用**).
+2. Select that row and press **ボーカル分離** (vocal separation).
+3. Choose the tracks and models and press **実行** (run). On first use you are asked to download the selected models (Kim about 240 MB, anvuew about 53 MB). The ZIP version also asks to download the separation engine (BSRoformer.cpp, about 22 MB) first; the Store version includes it.
+4. The results are listed. Select a row and press **▶ 再生** to preview; selecting another row while playing switches at the same position. For the vocal-reduced track, the **ボーカル量** slider changes the amount while you listen. Click a track name to pick one from the candidates (the track name candidates in Settings and so on) or type a name.
+5. Check the tracks you want and press **採用したトラックを追加** (add the selected tracks). They are inserted below the source track with the same offset. **保存...** saves a result elsewhere; the rest is deleted when the screen closes.
+
+- Output files are m4a next to the source file (`<name>_offvocal_kim.m4a` and so on).
+- **全モデルで候補を作る** makes one track per installed model so you can compare them; the best model depends on the song.
+- A GPU (NVIDIA / AMD / Intel with Vulkan) is used when available. Without one it still works, but takes minutes to tens of minutes per model.
+- Models are stored in `%LOCALAPPDATA%\PitaTrack\models` (the Store version keeps them, like its settings, in an app-specific location under `%LOCALAPPDATA%\Packages\`, which is removed on uninstall). **モデルフォルダーを開く** opens that folder, and you can add your own GGUF models for BSRoformer.cpp (BS-Roformer / Mel-Band Roformer). An optional `.json` with the same name (`{"label": "display name", "short": "short name", "role": "vocals" or "lead"}`) sets the display name, the short name used for `{model}` in track names, and the role.
+
+The default models are the following two. Their license texts (`*.LICENSE.txt`) are downloaded next to them.
+
+| Model | Use | Author | License |
+|---|---|---|---|
+| Kim Mel-Roformer | vocals (off-vocal, vocal reduce) | Kimberley Jensen | MIT |
+| BS-Roformer Karaoke anvuew | lead vocal (karaoke) | anvuew | GPL-3.0 |
+
+Both are the original weights converted to GGUF with [BSRoformer.cpp](https://github.com/chenmozhijin/BSRoformer.cpp) (MIT) and are downloaded from [GitHub Releases](https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/separation-models-20261019). The engine itself (BSRoformer.cpp and ggml, both MIT) is the author's Windows (Vulkan) build, used as is. The ZIP version downloads it to `tools\bsroformer` on first use; the Store version includes it (its license is shown under **設定 → ライセンス**, Settings → License).
+
 ### Keyboard Workflow
 
 The GUI is arranged so you can get to saving with `Tab`, text input, and `Enter` after launch. Press `Esc` to close the window.
@@ -331,6 +360,7 @@ Use the GUI **Settings** button to change:
 - Delay method and re-encoding bitrate
 - Step used by the offset buttons
 - Whether to always auto-adjust
+- Default names for the tracks made by vocal separation (vocal cut / vocal reduce / karaoke / vocals only; `{model}` becomes the model name and `{db}` the reduce amount such as `-8` or `+6`)
 
 GUI settings are saved to `tools\mixtrack_ffmpeg_gui.settings.json` (`%LOCALAPPDATA%\Programs\PitaTrack\tools\mixtrack_ffmpeg_gui.settings.json` when installed). The Store version saves them in an app-specific location under `%LOCALAPPDATA%\Packages\`, which is removed on uninstall.
 
@@ -475,6 +505,10 @@ This applies to the ZIP version (the Store version includes ffmpeg). Both the GU
 If the download does not work, for example because you are offline, download `ffmpeg.exe` from [ffmpeg.org](https://ffmpeg.org/download.html) and copy it into the `tools` folder.
 The CLI first checks `tools\ffmpeg.exe`, then checks `ffmpeg.exe` in the root folder.
 
+### Vocal Separation Cannot Download Its Files
+
+The models (and, in the ZIP version, the separation engine) are downloaded from the internet, so vocal separation does not work offline. Files downloaded on another PC can be used: put the models in the folder opened by **モデルフォルダーを開く**, and the ZIP version's engine in `tools\bsroformer`. The download source is shown in the confirmation before each download.
+
 ### Send To Is Not in the Right-Click Menu
 
 In Windows 11, choose **Right click → Show more options** to see **Send To**.
@@ -534,10 +568,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File dev\build_release.ps1
 This creates `dist\PitaTrack_vX.Y.Z.zip`.
 
 - The version is read from `$Script:AppVersion` in `tools\setup.ps1`. Update it before a release.
-- Only files tracked by git are included (the `dev` folder and `ffmpeg.exe` are not). Run `git add` for new files first.
+- Only files tracked by git are included (the `dev` folder, `ffmpeg.exe`, and `tools\bsroformer` are not). Run `git add` for new files first.
 - To change the ffmpeg version that is downloaded, first create a new release as described in [dev/ffmpeg-lgpl/README.md](dev/ffmpeg-lgpl/README.md), then put the URL and SHA256 of its zip (from the release's `SHA256SUMS.txt`) in `$Script:FfmpegUrl` and `$Script:FfmpegSha256` in `tools\setup.ps1`.
 - The icon is `tools\pitatrack.ico`. If you replace it, the next installation (or `tools\makesendto` run) uses it for `PitaTrack.exe`, the shortcuts, and the windows.
 
 ## The ffmpeg for PitaTrack (for Developers)
 
 The `ffmpeg.exe` that the ZIP version's setup downloads and the Store (MSIX) version bundles is built from the official FFmpeg source with LGPL components only (the "FFmpeg LGPL build" GitHub Actions workflow). See [dev/ffmpeg-lgpl/README.md](dev/ffmpeg-lgpl/README.md) (in Japanese) for how it is built, tested, and published to GitHub Releases, and for the license notice drafts.
+
+## The Vocal Separation Engine and Models (for Developers)
+
+The separation engine is the Windows (Vulkan) zip from the [BSRoformer.cpp](https://github.com/chenmozhijin/BSRoformer.cpp) GitHub Releases, used as is. The ZIP version downloads it to `tools\bsroformer` on first use according to `$Script:BsRoformerUrl` and `$Script:BsRoformerSha256` in `tools\mixtrack_ffmpeg_gui.ps1`. The Store version bundles it through `dev\build_msix.ps1`, because a Store app may not download executable code later and its install folder is read-only.
+
+The models are the original weights converted to q8_0 GGUF with BSRoformer.cpp's `scripts/convert_to_gguf.py`, published in the GitHub Release [separation-models-20261019](https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/separation-models-20261019) together with the license texts (`*.LICENSE.txt`), `models.json`, and `SHA256SUMS`. The app downloads them according to the URLs and SHA256 values in `$Script:SeparationModels`. To add or replace a model, create a release with a new tag and update `$Script:SeparationModelsReleaseUrl` and the SHA256 values. The study notes and conversion steps are in [dev/vocal-separation-feasibility.md](dev/vocal-separation-feasibility.md) and [dev/vocal-separation/README.md](dev/vocal-separation/README.md) (both in Japanese).
