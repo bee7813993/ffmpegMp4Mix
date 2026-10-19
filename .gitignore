@@ -5,3 +5,4 @@ tools/bsroformer/
 dist/
 build/
 tools/ffmpeg-licenses/
+__pycache__/

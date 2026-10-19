@@ -35,7 +35,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File dev\build_msix.ps1
 
 - `dist\PitaTrack_<版>_x64.msix` ができます。署名は不要です（Store が署名します）。
 - 版は `tools\setup.ps1` の `$Script:AppVersion`（例: 2.1.0 → 2.1.0.0）です。**提出するたびに、前に出したものより大きい版が必要**なので、更新のときは `$Script:AppVersion` を上げます（ZIP 版の版も一緒に上がります）。
-- 同梱の ffmpeg は、`build_msix.ps1` に書いた LGPL 版の Release（今は `ffmpeg-9.0.2-pitatrack2`）です。ffmpeg の版を上げたときは、下の「追加のライセンス条項」と「認定の注記」の URL も変えます。**ボーカル分離を入れた版は `ffmpeg-9.0.2-pitatrack2` 以降の ffmpeg が必要**です（wav・ipod のマルチプレクサーと amerge・pan・alimiter のフィルター）。
+- 同梱の ffmpeg は、`build_msix.ps1` に書いた LGPL 版の Release（今は `ffmpeg-9.0.2-pitatrack3`）です。ffmpeg の版を上げたときは、下の「追加のライセンス条項」と「認定の注記」の URL も変えます。**ボーカル分離を入れた版は `ffmpeg-9.0.2-pitatrack2` 以降の ffmpeg が必要**です（wav・ipod のマルチプレクサーと amerge・pan・alimiter のフィルター）。
 - 同梱のボーカル分離エンジン BSRoformer.cpp は、`tools\mixtrack_ffmpeg_gui.ps1` の `$Script:BsRoformerUrl` の版（今は v0.1.0 の Windows Vulkan 版）です。これでパッケージは約 36 MB になります（ffmpeg だけのときは約 14 MB）。分離モデルはパッケージに入れず、アプリが初めて使うときにダウンロードします。
 - 手元での確認（任意）: 開発者モードで `-Register -DevIdentity` を付けて登録し、右クリック、GUI、CLI、「設定 → ライセンス」を試します。そのあと `Get-AppxPackage PitaTrack.Dev | Remove-AppxPackage` で外します。`-DevIdentity` を付けずに `-Register` すると Store の ID で登録され、同じ PC に Store から入れるときにぶつかります。
 
@@ -114,7 +114,7 @@ IARC の質問票に答えます。ゲームではないアプリで、暴力や
 
 このアプリには FFmpeg プロジェクト（https://ffmpeg.org/）の ffmpeg.exe が入っています。
 このソフトウェアは LGPLv2.1 でライセンスされた FFmpeg のコードを使っています。ソースはこちらからダウンロードできます:
-https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack2
+https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack3
 FFmpeg は GNU Lesser General Public License version 2.1 以降のライセンスで配布されています。
 ぴたトラックの提供者は FFmpeg の著作権を持っていません。FFmpeg の著作権はその作者たちにあります（https://ffmpeg.org/ とソースを参照）。
 この条項は、LGPL が利用者に認める権利（FFmpeg を改変すること、その改変のデバッグのためにリバースエンジニアリングすることを含む）を制限しません。
@@ -127,7 +127,7 @@ PitaTrack is provided under the Apache License 2.0 (https://github.com/bee781399
 
 This app includes ffmpeg.exe from the FFmpeg project (https://ffmpeg.org/).
 This software uses code of FFmpeg licensed under the LGPLv2.1 and its source can be downloaded here:
-https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack2
+https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack3
 FFmpeg is licensed under the GNU Lesser General Public License version 2.1 or later.
 The provider of PitaTrack does not own FFmpeg. FFmpeg is copyrighted by its authors (see https://ffmpeg.org/ and the source).
 Nothing in these terms restricts the rights the LGPL gives you, including the right to modify FFmpeg and to reverse engineer for debugging such modifications.
@@ -156,7 +156,7 @@ How to test:
 3. "設定" (settings) > "ライセンス" (license) shows the license notices.
 4. Vocal separation (optional; needs an internet connection): with the video loaded, check "元動画の音声を1トラック目に使用", select that row, click "ボーカル分離" and then "実行". The app asks to download the model (about 240 MB) from GitHub Releases; answer "はい". The separated tracks are listed with a preview. A Vulkan-capable GPU makes it fast; on a CPU it takes several minutes.
 The UI is in Japanese only. The app uses the in-box Windows PowerShell 5.1, so it does not run on Windows in S mode; it shows a message in that case.
-ffmpeg.exe is FFmpeg 9.0.2 built with LGPL components only. Its license text and source code are included in the package under licenses\FFmpeg and are also available at https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack2.
+ffmpeg.exe is FFmpeg 9.0.2 built with LGPL components only. Its license text and source code are included in the package under licenses\FFmpeg and are also available at https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack3.
 tools\bsroformer\bs_roformer-cli.exe and ggml*.dll are the unmodified Windows (Vulkan) build of BSRoformer.cpp v0.1.0 (MIT) from https://github.com/chenmozhijin/BSRoformer.cpp/releases/tag/v0.1.0; their license texts are under licenses\BSRoformer.cpp. They use the Microsoft Visual C++ runtime, declared as a dependency on Microsoft.VCLibs.140.00.UWPDesktop.
 ```
 

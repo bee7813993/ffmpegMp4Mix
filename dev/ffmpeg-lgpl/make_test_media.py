@@ -3,7 +3,7 @@
 
 使い方: make_test_media.py 出力先 [FFMPEG]
 
-FFMPEG（既定: PATH の ffmpeg）は libx264、libmp3lame、libvorbis、libopus 入りの
+FFMPEG（既定: PATH の ffmpeg）は libx264、libmp3lame、libvorbis、libopus と ac3、eac3 のエンコーダー入りの
 ふつうのビルドにする。素材を作るだけで、確かめる対象の ffmpeg ではない。
 
 どのファイルも同じ合成の「曲」（立ち上がりのはっきりした音の並び）が入っている:
@@ -41,6 +41,9 @@ FORMATS = [
     ("_vorbis.ogg", ["-c:a", "libvorbis", "-q:a", "5"], "vorbis"),
     ("_opus.ogg", ["-c:a", "libopus", "-b:a", "128k"], "opus"),
     ("_flac.ogg", ["-c:a", "flac", "-f", "ogg"], "flac"),
+    # MP4 の中の AC-3 / E-AC-3（テレビ録画など）。pitatrack3 から自動調整とボーカル分離の対象
+    ("_ac3.mp4", ["-c:a", "ac3", "-b:a", "192k"], "ac3"),
+    ("_eac3.mp4", ["-c:a", "eac3", "-b:a", "192k"], "eac3"),
 ]
 # early と late は、artifact を小さくするためにこの形式だけで作る
 SHIFTED_FORMATS = {".m4a", "_alac.m4a", ".aac", ".mp3", ".wav", ".flac", "_vorbis.ogg", "_opus.ogg"}

@@ -14,6 +14,8 @@ param(
     [switch]$Karaoke,
     # A だけ（ダウンロードと分離をしない。ライセンス表示と「モデルフォルダーを開く」の確認用）
     [switch]$SkipSeparation,
+    # B で標準モデルを退避しない（初回ダウンロードは起こさず、分離だけを確かめる。素材を変えて試すとき）
+    [switch]$KeepModels,
     [int]$TimeoutSeconds = 900
 )
 
@@ -293,8 +295,13 @@ if ($SkipSeparation) {
 Note '==== B: standard models moved away (first download)'
 $moveScript = '$src = Join-Path $env:LOCALAPPDATA ''PitaTrack\models''; $dst = ''' + $backupDir + '''; New-Item -ItemType Directory -Path $dst -Force | Out-Null; foreach ($n in @(''' + ($standardFiles -join ''',''') + ''')) { $p = Join-Path $src $n; if (Test-Path -LiteralPath $p) { Move-Item -LiteralPath $p -Destination (Join-Path $dst $n) -Force } }'
 $restoreScript = '$src = ''' + $backupDir + '''; $dst = Join-Path $env:LOCALAPPDATA ''PitaTrack\models''; New-Item -ItemType Directory -Path $dst -Force | Out-Null; foreach ($n in @(''' + ($standardFiles -join ''',''') + ''')) { $p = Join-Path $src $n; if (Test-Path -LiteralPath $p) { Move-Item -LiteralPath $p -Destination (Join-Path $dst $n) -Force } }'
-Invoke-OutsidePackage -Script $moveScript
-Note ('real models folder after move-away (outside): ' + ((Get-OutsideFiles $realModelsWmiPath) -join ', '))
+if ($KeepModels) {
+    Note 'KeepModels: standard models stay in place (no first download)'
+}
+else {
+    Invoke-OutsidePackage -Script $moveScript
+    Note ('real models folder after move-away (outside): ' + ((Get-OutsideFiles $realModelsWmiPath) -join ', '))
+}
 $writeDir = $null
 try {
     $gui = Start-Gui -Prefix 'B1'
@@ -355,7 +362,12 @@ try {
         Note ($candidate.Name + ' models folder after download (outside): ' + ($files -join ', '))
         if (($files -join ' ') -match 'kim_mel_vocals-Q8_0\.gguf') { $writeDir = $candidate.Path }
     }
-    Note ('downloads landed in: ' + $writeDir + '; model prompt showed that folder: ' + ($null -ne $writeDir -and ($prompts -join ' ').IndexOf($writeDir, [StringComparison]::OrdinalIgnoreCase) -ge 0))
+    if ($KeepModels) {
+        Note ('models used from: ' + $writeDir + ' (no download expected; prompts: ' + $prompts.Count + ')')
+    }
+    else {
+        Note ('downloads landed in: ' + $writeDir + '; model prompt showed that folder: ' + ($null -ne $writeDir -and ($prompts -join ' ').IndexOf($writeDir, [StringComparison]::OrdinalIgnoreCase) -ge 0))
+    }
     if ($null -eq $adoptButton) {
         Save-Shot -Window $dialog -Name 'B4_timeout'
         throw ('results did not appear; status: ' + ((Get-StatusTexts -Root $dialog) -join ' | '))
@@ -414,8 +426,10 @@ try {
     Close-Gui -Gui $gui
 }
 finally {
-    Invoke-OutsidePackage -Script $restoreScript
-    Note ('real models folder after restore (outside): ' + ((Get-OutsideFiles $realModelsWmiPath) -join ', '))
+    if (-not $KeepModels) {
+        Invoke-OutsidePackage -Script $restoreScript
+        Note ('real models folder after restore (outside): ' + ((Get-OutsideFiles $realModelsWmiPath) -join ', '))
+    }
     $report | Set-Content -LiteralPath (Join-Path $ShotDir 'report.txt') -Encoding UTF8
 }
 Write-Host 'done'
