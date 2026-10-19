@@ -35,7 +35,7 @@ ffmpeg は、`dev\ffmpeg-lgpl` でビルドした LGPL 版の GitHub Release（�
 - 起動用の PitaTrack.exe は、パッケージの中で動いているときに環境変数 `PITATRACK_PACKAGED=1` を渡します。PowerShell とその先（ffmpeg、CLI 版の cmd）もパッケージの中で起動します（`PROC_THREAD_ATTRIBUTE_DESKTOP_APP_POLICY`）。指定しないと Windows のプログラムはパッケージの外で動き、設定の振り替えが効きません。
 - ffmpeg はパッケージの `tools\ffmpeg.exe` に入れます。setup.ps1 は入れないので、アプリが ffmpeg をダウンロードすることはありません。
 - ボーカル分離のエンジン（`bs_roformer-cli.exe` と ggml の dll）はパッケージの `tools\bsroformer` に入れます。Store の規約で実行ファイルをあとからダウンロードできず、インストール先にも書き込めないためです。GUI は `PITATRACK_PACKAGED=1` のときダウンロードせず、exe がなければ「この版には入っていない」と表示します（`Request-BsRoformer`）。exe と dll は Visual C++ ランタイム（msvcp140 / vcruntime140 / vcomp140）を使うので、マニフェストで `Microsoft.VCLibs.140.00.UWPDesktop` に依存し、Store が一緒に入れます。パッケージの中で動くプロセスは、この依存パッケージから dll を読み込みます。
-- 分離モデル（GGUF）はパッケージに入れず、ZIP 版と同じ `%LOCALAPPDATA%\PitaTrack\models` に初めて使うときダウンロードします。Store から入れたパッケージでは、設定と同じく Windows が書き込みを `%LOCALAPPDATA%\Packages\<パッケージ>\LocalCache\Local\PitaTrack\models` に振り替えることがあります（アンインストールで消える）。ただし、開発者モードで登録した署名なしのパッケージ（`-Register -DevIdentity`）では振り替えられず、実フォルダーに書かれました（2026-10-19、Windows 11 26200 で、パッケージ ID を持つプロセスから確認。Store から入れた版でどうなるかは未確認）。エクスプローラーはパッケージの外で動いて振り替えが効かないので、「モデルフォルダーを開く」と置き場の案内は、小さなファイルを書いてどちらに落ちたかを調べた実パスを使います（`Get-SeparationModelsRealDir`。パッケージ ファミリー名は kernel32 の `GetCurrentPackageFamilyName`）。ユーザーがそのフォルダーに置いた GGUF（と同名の .json）も一覧に出ます。
+- 分離モデル（GGUF）はパッケージに入れず、初めて使うときに ZIP 版と同じ `%LOCALAPPDATA%\PitaTrack\models` にダウンロードします。Store から入れた版では、設定と同じく Windows が書き込みを `%LOCALAPPDATA%\Packages\<パッケージ>\LocalCache\Local\PitaTrack\models` に振り替え、アンインストールすると消えます（2.2.0.0 を SAC オンの仮想マシンで確認。2026-10-20）。開発者モードで登録した署名なしのパッケージ（`-Register -DevIdentity`）では振り替えられず、実フォルダーに書かれます。エクスプローラーはパッケージの外で動いて振り替えが効かないので、「モデルフォルダーを開く」と置き場の案内は、小さなファイルを書いてどちらに落ちたかを調べた実パスを使います（`Get-SeparationModelsRealDir`。パッケージ ファミリー名は kernel32 の `GetCurrentPackageFamilyName`）。ユーザーがそのフォルダーに置いた GGUF（と同名の .json）も一覧に出ます。
 - ライセンスはパッケージの `licenses\` に入れます。`README.txt`（アプリの「設定 → ライセンス」で表示）、`PitaTrack\LICENSE`（Apache 2.0）、`FFmpeg\`（LGPL 2.1 の全文、BUILD.txt、mingw-w64 の著作権表示）、`FFmpeg\source\`（FFmpeg 公式のソース `ffmpeg-<版>.tar.xz` と署名、ビルドに使ったファイル）、`BSRoformer.cpp\`（BSRoformer.cpp と ggml の MIT License）です。ソースは、LGPL 2.1 の第 4 節に沿って実行形式と一緒に届けるため、約 12 MB 増えても入れています。
 - 「送る」には登録しません。右クリックメニューで代わりにします。ファイルの種類の動詞（uap3:Verb）は、ぴたトラックを既定のアプリにしないと右クリックに出ないため使っていません。
 
@@ -44,6 +44,5 @@ ffmpeg は、`dev\ffmpeg-lgpl` でビルドした LGPL 版の GitHub Release（�
 提出の手順と、各欄に書く内容の案は [store-submission.md](store-submission.md) にまとめています。
 
 - Store の掲載情報の「追加のライセンス条項」と説明文に、FFmpeg を LGPLv2.1 で使っていることとソースの場所を書く（文案は `dev\ffmpeg-lgpl\license-notice.md` の 2 と 3）。ボーカル分離を入れた版からは、BSRoformer.cpp / ggml（MIT）とモデル（初回ダウンロード）の記載も足す（文案は `store-submission.md`）。
-- Store から入れた版（非公開の対象ユーザー）で、モデルと設定が実フォルダーと `LocalCache` のどちらに書かれるか、「モデルフォルダーを開く」が同じ場所を開くかを確かめる。
 - GitHub Actions でパッケージを作る。
 - SAC がオンの PC（Hyper-V の仮想マシン）で、Store が署名した版を確かめる。

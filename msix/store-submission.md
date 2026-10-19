@@ -181,7 +181,7 @@ tools\bsroformer\bs_roformer-cli.exe and ggml*.dll are the unmodified Windows (V
    - GUI 版で自動調整と MP4 の保存までできるか
    - CLI 版で MP4 ができるか
    - 「設定 → ライセンス」の表示（BSRoformer.cpp とモデルの項も出るか）
-   - ボーカル分離（モデルのダウンロードと分離。GPU のない仮想マシンでは CPU で動くので数分かかる）。モデルが `%LOCALAPPDATA%\PitaTrack\models` と `%LOCALAPPDATA%\Packages\<パッケージ>\LocalCache\Local\PitaTrack\models` のどちらに落ちたか、「モデルフォルダーを開く」がその場所を開くかも見る（開発者モードで登録した版では前者だった）
+   - ボーカル分離（モデルのダウンロードと分離。GPU のない仮想マシンでは CPU で動くので数分かかる）。モデルが `%LOCALAPPDATA%\PitaTrack\models` と `%LOCALAPPDATA%\Packages\<パッケージ>\LocalCache\Local\PitaTrack\models` のどちらに落ちたか、「モデルフォルダーを開く」がその場所を開くかも見る（Store 署名の 2.2.0.0 では後者、開発者モードで登録した版では前者だった）。`dev\vocal-separation\msix_test.ps1 -PackageName YFRTeam.36059D6F4B72A` を仮想マシンにコピーして実行すると、これらを自動で確かめられる
 4. 仮想マシンの管理者の PowerShell で次を実行し、何かブロックされていないかを見ます。
 
    ```powershell
