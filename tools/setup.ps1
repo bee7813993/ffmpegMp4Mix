@@ -33,8 +33,8 @@ $Script:IconFileName = 'pitatrack.ico'
 
 # ダウンロードする ffmpeg（dev\ffmpeg-lgpl でビルドした LGPL 版。GitHub Release の ffmpeg-<版>-pitatrack<番号>）。
 # 版を上げるときは、その Release の zip の URL と SHA256（Release の SHA256SUMS.txt）を一緒に変えます。
-$Script:FfmpegUrl = 'https://github.com/bee7813993/ffmpegMp4Mix/releases/download/ffmpeg-9.0.2-pitatrack2/ffmpeg-9.0.2-pitatrack2-lgpl-win64.zip'
-$Script:FfmpegSha256 = 'abcf7a24f697fb1886e52cdf382700493390a70e6b68b1abcc0f39c3ce03b2ad'
+$Script:FfmpegUrl = 'https://github.com/bee7813993/ffmpegMp4Mix/releases/download/ffmpeg-9.0.2-pitatrack3/ffmpeg-9.0.2-pitatrack3-lgpl-win64.zip'
+$Script:FfmpegSha256 = '1ac800f3f3b7ffdaa791c8ebd35403779daa4603920a82a267f86723af969079'
 $Script:FfmpegSizeText = '約2MB'
 # ffmpeg.exe と一緒に取り出すライセンスのファイル（LGPL の全文、ソースの場所、ビルドの指定）を置く tools の下のフォルダー
 $Script:FfmpegLicenseDirName = 'ffmpeg-licenses'
