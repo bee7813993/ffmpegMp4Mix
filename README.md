@@ -6,8 +6,9 @@ It uses `ffmpeg` to create MP4 files whose audio track names are easier to ident
 
 ## Features
 
-- Install by extracting the ZIP and opening `setup` (ffmpeg is downloaded for you)
-- Launch from Windows **Send To** or by dragging files onto the entry files
+- Install from the [Microsoft Store](https://apps.microsoft.com/detail/9NSM4JBT6Z9T) and start using it (ffmpeg is included; works on PCs where Smart App Control is on)
+- A ZIP version is also available: extract it and open `setup` (ffmpeg is downloaded for you)
+- Launch from the right-click menu (Store version: "ぴたトラックでまとめる"; ZIP version: **Send To**) or by dragging files
 - Uses the first `.mp4` file found as the video, even when it is not first in the received order
 - Configure default track names
 - Optionally use the source video's audio as the first track
@@ -27,14 +28,14 @@ Features under `GUI only` are available only in the GUI. The CLI uses file order
 
 ## Which file should I use?
 
-| Purpose | Send To name | File |
-|---|---|---|
-| Check and adjust tracks in a window (GUI) | ぴたトラック | `mixtrack_ffmpeg_gui` |
-| Finish quickly with fewer steps (CLI) | ぴたトラック (CLI版) | `mixtrack_ffmpeg` |
+| Purpose | Store version right-click item | ZIP version Send To name | ZIP version file |
+|---|---|---|---|
+| Check and adjust tracks in a window (GUI) | ぴたトラックでまとめる | ぴたトラック | `mixtrack_ffmpeg_gui` |
+| Finish quickly with fewer steps (CLI) | ぴたトラック (CLI版) でまとめる | ぴたトラック (CLI版) | `mixtrack_ffmpeg` |
 
-After installation, **Send To** has the entries "ぴたトラック" (GUI) and "ぴたトラック (CLI版)" (CLI).
+With the Store version, select video or audio files and right-click them to see "ぴたトラックでまとめる" (GUI) and "ぴたトラック (CLI版) でまとめる" (CLI).
 
-When using the tool without installing it, or when dragging files directly, use `mixtrack_ffmpeg_gui` or `mixtrack_ffmpeg` in the root folder.
+After installing the ZIP version, **Send To** has the entries "ぴたトラック" (GUI) and "ぴたトラック (CLI版)" (CLI). When using the ZIP version without installing it, or when dragging files directly, use `mixtrack_ffmpeg_gui` or `mixtrack_ffmpeg` in the root folder.
 If file extensions are hidden in Explorer, `.bat` is not shown.
 
 ## Screenshots
@@ -48,6 +49,8 @@ If file extensions are hidden in Explorer, `.bat` is not shown.
 ![CLI example](docs/images/cli-example.png)
 
 ## Folder Layout
+
+This is the layout of the ZIP version (the Store version is installed in a location managed by Windows).
 
 The root folder contains the drag-and-drop entry files. Internal files are kept in `tools`.
 When installed, this folder is `%LOCALAPPDATA%\Programs\PitaTrack`.
@@ -77,13 +80,29 @@ PitaTrack\
 
 ## Requirements
 
-- Windows 10 or Windows 11
-- PowerShell 5.x
-- `ffmpeg.exe`
+- Store version: Windows 10 version 2004 or later, or Windows 11 (x64). ffmpeg is included.
+- ZIP version: Windows 10 or Windows 11, PowerShell 5.x, and `ffmpeg.exe` (downloaded automatically by setup)
+- Both use the PowerShell built into Windows, so they do not run on Windows in S mode.
 
 ## Installation
 
-### Easy Installation (Recommended)
+### From the Microsoft Store (Recommended)
+
+1. Open [PitaTrack in the Microsoft Store](https://apps.microsoft.com/detail/9NSM4JBT6Z9T).
+2. Press **Get** (or **Install**).
+
+That's all.
+
+- `ffmpeg`, which is needed to create MP4 files, is included. Nothing else needs to be downloaded.
+- It works on PCs where Windows 11 **Smart App Control** is on.
+- New versions arrive automatically from the Microsoft Store.
+- Select video or audio files and right-click them to see "ぴたトラックでまとめる" (GUI) and "ぴたトラック (CLI版) でまとめる" (CLI). You can also open "ぴたトラック" from the Start menu.
+- If you installed the ZIP version with `setup`, the Store version reads its settings (once you save settings in the Store version, those are used from then on). The ZIP version stays installed; uninstall it if you no longer need it.
+- Uninstall it like other Store apps from **Settings → Apps → Installed apps**. Its settings are removed too.
+
+### Install from the ZIP
+
+Use the ZIP version on PCs that cannot use the Microsoft Store, or to use PitaTrack without installing it.
 
 1. Download `PitaTrack_vX.Y.Z.zip` from [GitHub Releases](https://github.com/bee7813993/ffmpegMp4Mix/releases).
 2. Right-click the downloaded ZIP and choose **Extract All**.
@@ -103,7 +122,7 @@ If Windows shows "The publisher could not be verified. Are you sure you want to 
 
 When you open `setup`, a console window flashes briefly before the setup window appears.
 
-On PCs where Windows 11 **Smart App Control** is on, PitaTrack may be blocked and not run. If nothing happens when you open `setup`, or Windows says Smart App Control blocked it, see [Nothing Happens When Opening setup (Smart App Control)](#nothing-happens-when-opening-setup-smart-app-control).
+On PCs where Windows 11 **Smart App Control** is on, the ZIP version is blocked and does not run. Use the [Microsoft Store version](https://apps.microsoft.com/detail/9NSM4JBT6Z9T) instead. For details, see [Nothing Happens When Opening setup (Smart App Control)](#nothing-happens-when-opening-setup-smart-app-control).
 
 #### Updating
 
@@ -151,10 +170,12 @@ Example:
 03_audio2.m4a
 ```
 
-### Launch from Send To
+### Launch from the Right-Click Menu
 
 1. Select the video and audio files.
-2. Choose **Right click → Send To → ぴたトラック**. In Windows 11, **Send To** is under **Right click → Show more options**.
+2. Right-click them and choose:
+   - Store version: **ぴたトラックでまとめる**
+   - ZIP version: **Send To → ぴたトラック**. In Windows 11, **Send To** is under **Right click → Show more options**.
 3. The track list is shown.
 4. Edit track names, order, and output path as needed.
 5. Press **保存** (save) to run `ffmpeg` and create the output file.
@@ -166,9 +187,9 @@ Example:
 - Re-saving to a file already saved from the same window skips the overwrite confirmation.
 - Saving may fail while the output file is open in a player. Close it in the player and save again.
 
-When launched from Send To, the received file order is used as the initial track order. In the GUI, you can reorder tracks before running.
+When launched from the right-click menu, the received file order is used as the initial track order. In the GUI, you can reorder tracks before running.
 
-You can also drag and drop the video and audio files together onto "ぴたトラック" on the desktop.
+With the ZIP version, you can also drag and drop the video and audio files together onto "ぴたトラック" on the desktop.
 
 ### Launch by itself
 
@@ -264,8 +285,9 @@ Example:
 
 ### Launch
 
-- Select files and choose **Send To → ぴたトラック (CLI版)**
-- Drag and drop files onto `mixtrack_ffmpeg`
+- Store version: select files, right-click, and choose **ぴたトラック (CLI版) でまとめる**
+- ZIP version: select files and choose **Send To → ぴたトラック (CLI版)**
+- ZIP version: drag and drop files onto `mixtrack_ffmpeg`
 
 The first `.mp4` file found is used as the video.
 All other files are added as audio tracks.
@@ -310,7 +332,7 @@ Use the GUI **Settings** button to change:
 - Step used by the offset buttons
 - Whether to always auto-adjust
 
-GUI settings are saved to `tools\mixtrack_ffmpeg_gui.settings.json` (`%LOCALAPPDATA%\Programs\PitaTrack\tools\mixtrack_ffmpeg_gui.settings.json` when installed).
+GUI settings are saved to `tools\mixtrack_ffmpeg_gui.settings.json` (`%LOCALAPPDATA%\Programs\PitaTrack\tools\mixtrack_ffmpeg_gui.settings.json` when installed). The Store version saves them in an app-specific location under `%LOCALAPPDATA%\Packages\`, which is removed on uninstall.
 
 On first launch, the GUI reads `TRACKNAME_1`, `TRACKNAME_2`, `TRACKNAME_3` ..., `TRACKNAME_LATER`, `OUTPUT_SUFFIX`, `DELAY_MODE`, and `REENCODE_BITRATE` from `mixtrack_ffmpeg.bat` as defaults.
 
@@ -429,7 +451,9 @@ You are opening `setup` directly inside the ZIP file. Right-click the ZIP file, 
 
 Windows 11 **Smart App Control** may be on.
 
-Smart App Control is a Windows feature that blocks apps whose trust cannot be confirmed. PitaTrack is an unsigned app made by an individual developer, so it is blocked on PCs where Smart App Control is on. There is no way to allow a single app. On new PCs, Windows may turn it on automatically after you have used the PC for a while. If it is turned on after installation, PitaTrack also stops opening.
+Smart App Control is a Windows feature that blocks apps whose trust cannot be confirmed. The ZIP version of PitaTrack is unsigned, so it is blocked on PCs where Smart App Control is on. There is no way to allow a single app. On new PCs, Windows may turn it on automatically after you have used the PC for a while. If it is turned on after installation, the ZIP version also stops opening.
+
+The easiest fix is to use the [Microsoft Store version](https://apps.microsoft.com/detail/9NSM4JBT6Z9T). It is signed by Microsoft, so it works with Smart App Control left on.
 
 To check:
 
@@ -437,7 +461,7 @@ To check:
 2. Open **App & browser control** → **Smart App Control settings**.
 3. If it is **On**, this is the cause. If it is **Evaluation** or **Off**, the cause is something else.
 
-To use PitaTrack, turn Smart App Control **Off**, then open `setup` again.
+If you need the ZIP version, turn Smart App Control **Off**, then open `setup` again.
 
 Before turning it off, note the following:
 
@@ -446,7 +470,7 @@ Before turning it off, note the following:
 
 ### ffmpeg.exe Was Not Found
 
-Both the GUI and the CLI show a download window when `ffmpeg.exe` is not found. Press **ダウンロード** (download).
+This applies to the ZIP version (the Store version includes ffmpeg). Both the GUI and the CLI show a download window when `ffmpeg.exe` is not found. Press **ダウンロード** (download).
 
 If the download does not work, for example because you are offline, download `ffmpeg.exe` from [ffmpeg.org](https://ffmpeg.org/download.html) and copy it into the `tools` folder.
 The CLI first checks `tools\ffmpeg.exe`, then checks `ffmpeg.exe` in the root folder.
@@ -496,6 +520,8 @@ This tool is intended for users who previously used tools such as `L-SMASH Muxer
 PitaTrack was formerly called ffmpegMp4Mix.
 
 The ffmpeg downloaded by setup and the download window is built from the official FFmpeg 9.0.2 source with only the components PitaTrack uses, under the LGPL ([ffmpeg-9.0.2-pitatrack1](https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack1)). This software uses code of FFmpeg licensed under the LGPLv2.1 and its source can be downloaded from the same release. The downloaded zip is checked with SHA256, and then `ffmpeg.exe` and the license files (`tools\ffmpeg-licenses`) are extracted.
+
+The Store version includes the same ffmpeg with its license files and source (see **設定 → ライセンス**, Settings → License, in the app).
 
 This ffmpeg leaves out what PitaTrack does not use, such as video re-encoding, `ffprobe`, and `ffplay`. If you want an ffmpeg for other uses too, you can put one from [ffmpeg.org](https://ffmpeg.org/download.html) in the `tools` folder. An ffmpeg downloaded by an earlier PitaTrack version (the gyan.dev build) is kept and used as is when you update.
 
