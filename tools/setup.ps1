@@ -18,7 +18,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # アプリの版。配布ZIPの名前（dev\build_release.ps1）にも使います。
-$Script:AppVersion = '2.1.0'
+$Script:AppVersion = '2.2.0'
 $Script:AppName = 'ぴたトラック'
 $Script:Publisher = 'bee7813993'
 $Script:ProjectUrl = 'https://github.com/bee7813993/ffmpegMp4Mix'

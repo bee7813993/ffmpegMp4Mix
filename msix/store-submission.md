@@ -34,7 +34,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File dev\build_msix.ps1
 ```
 
 - `dist\PitaTrack_<版>_x64.msix` ができます。署名は不要です（Store が署名します）。
-- 版は `tools\setup.ps1` の `$Script:AppVersion`（例: 2.1.0 → 2.1.0.0）です。**提出するたびに、前に出したものより大きい版が必要**なので、更新のときは `$Script:AppVersion` を上げます（ZIP 版の版も一緒に上がります）。
+- 版は `tools\setup.ps1` の `$Script:AppVersion`（例: 2.2.0 → 2.2.0.0）です。**提出するたびに、前に出したものより大きい版が必要**なので、更新のときは `$Script:AppVersion` を上げます（ZIP 版の版も一緒に上がります）。
 - 同梱の ffmpeg は、`build_msix.ps1` に書いた LGPL 版の Release（今は `ffmpeg-9.0.2-pitatrack3`）です。ffmpeg の版を上げたときは、下の「追加のライセンス条項」と「認定の注記」の URL も変えます。**ボーカル分離を入れた版は `ffmpeg-9.0.2-pitatrack2` 以降の ffmpeg が必要**です（wav・ipod のマルチプレクサーと amerge・pan・alimiter のフィルター）。
 - 同梱のボーカル分離エンジン BSRoformer.cpp は、`tools\mixtrack_ffmpeg_gui.ps1` の `$Script:BsRoformerUrl` の版（今は v0.1.0 の Windows Vulkan 版）です。これでパッケージは約 36 MB になります（ffmpeg だけのときは約 14 MB）。分離モデルはパッケージに入れず、アプリが初めて使うときにダウンロードします。
 - 手元での確認（任意）: 開発者モードで `-Register -DevIdentity` を付けて登録し、右クリック、GUI、CLI、「設定 → ライセンス」を試します。そのあと `Get-AppxPackage PitaTrack.Dev | Remove-AppxPackage` で外します。`-DevIdentity` を付けずに `-Register` すると Store の ID で登録され、同じ PC に Store から入れるときにぶつかります。
@@ -101,7 +101,13 @@ IARC の質問票に答えます。ゲームではないアプリで、暴力や
 
 **スクリーンショット（Screenshots）**: 1 の 3 で用意したもの。
 
-**このバージョンの新機能（What's new）**: 初回の提出では空欄。
+**このバージョンの新機能（What's new）**: 初回の提出（2.1.0）では空欄。更新のたびに書きます。2.2.0 の案:
+
+```text
+・ボーカル分離を追加しました。1 つの音源から、オフボーカル、ボーカルリデュース、コーラス入りオフボーカルのトラックを作れます。分離に使うモデルは、初めて使うときにダウンロードします。Vulkan に対応した GPU があると速く処理できます。
+・MP4 の中の AC-3 / E-AC-3 の音声も、自動調整とボーカル分離の対象にできるようになりました。
+・同梱の ffmpeg を更新しました（FFmpeg 9.0.2 のぴたトラック用 LGPL ビルド 3）。
+```
 
 **キーワード（Search terms）の例**: 音声トラック、MP4、オフボーカル、カラオケ、トラック名、ffmpeg、ボーカル分離
 
