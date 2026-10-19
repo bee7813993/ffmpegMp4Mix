@@ -19,6 +19,9 @@ param(
 #      （-itsoffset で遅らせるコピー、-ss で早めるコピー、adelay と aac の再エンコード）
 #      まとめた各トラックの音の出だしが、動画の音声とそろっていることも確かめる
 #   3. 自動調整の AudioOffsetAnalyzer（-f f32le で標準出力に取り出す）で各形式を読み、ずれを推定する
+#   4. ボーカル分離: ConvertTo-SeparationWav（44.1 kHz float の WAV に変換）、New-SeparationDerivedTrack（amerge・pan・alimiter で
+#      元音源 − ステム × k を .m4a に書く）、Export-SeparationStem（ステムを .m4a に書く）。ステムには元音源そのものを使い、
+#      オフボーカル（1 と −1）がほぼ無音に、リデュース（−8 dB）が元の約 40% になることを見る
 # 関数と C# は GUI のスクリプトから読み込むので、GUI を変えればこのテストもそれに従います。
 # ファイル名、フォルダー名、トラック名には日本語と空白を使います。
 
@@ -117,7 +120,8 @@ $guiAst = [System.Management.Automation.Language.Parser]::ParseFile($guiScript, 
 if ($parseErrors.Count -gt 0) {
     throw ('GUI のスクリプトを読めませんでした: ' + $parseErrors[0].Message)
 }
-foreach ($functionName in @('Build-FfmpegArguments', 'ConvertTo-DelayMode', 'Test-ReencodeBitrateText', 'ConvertTo-ReencodeBitrate', 'Format-FfmpegDuration', 'ConvertTo-CommandLineArgument', 'New-TrackItem')) {
+foreach ($functionName in @('Build-FfmpegArguments', 'ConvertTo-DelayMode', 'Test-ReencodeBitrateText', 'ConvertTo-ReencodeBitrate', 'Format-FfmpegDuration', 'ConvertTo-CommandLineArgument', 'New-TrackItem',
+        'Get-CommandLine', 'Read-SharedTextFile', 'Invoke-SeparationProcess', 'Assert-SeparationProcessSucceeded', 'ConvertTo-SeparationWav', 'Get-SeparationReduceGains', 'New-SeparationDerivedTrack', 'Export-SeparationStem')) {
     $definition = $guiAst.Find({
             param($node)
             $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName
@@ -127,6 +131,18 @@ foreach ($functionName in @('Build-FfmpegArguments', 'ConvertTo-DelayMode', 'Tes
     }
     . ([scriptblock]::Create($definition.Extent.Text))
 }
+
+# ボーカル分離の関数が使うリミッターの指定（スクリプト変数）も GUI から読む。
+# Invoke-SeparationProcess は待つあいだ WinForms の DoEvents を呼ぶので、そのアセンブリも読み込む
+$limiterAssignment = $guiAst.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$Script:SeparationLimiterFilter'
+    }, $true)
+if ($null -eq $limiterAssignment) {
+    throw ('$Script:SeparationLimiterFilter が ' + $guiScript + ' に見つかりません。')
+}
+. ([scriptblock]::Create($limiterAssignment.Extent.Text))
+Add-Type -AssemblyName System.Windows.Forms
 
 $addType = $guiAst.Find({
         param($node)
@@ -287,8 +303,8 @@ if (-not $UsageOnly) {
         decoders  = @('aac', 'mp3float', 'mp3', 'vorbis', 'opus', 'flac', 'alac', 'pcm_u8', 'pcm_s16le', 'pcm_s24le', 'pcm_s32le', 'pcm_f32le')
         encoders  = @('aac', 'pcm_f32le')
         demuxers  = @('mov', 'mp4', 'm4a', 'aac', 'mp3', 'wav', 'flac', 'ogg')
-        muxers    = @('mp4', 'f32le')
-        filters   = @('adelay', 'aresample')
+        muxers    = @('mp4', 'f32le', 'wav', 'ipod')
+        filters   = @('adelay', 'aresample', 'amerge', 'pan', 'alimiter')
         protocols = @('file', 'pipe')
         bsfs      = @('aac_adtstoasc')
     }
@@ -420,6 +436,67 @@ foreach ($file in $files) {
     $analysis = [AudioOffsetAnalyzer]::Analyze($reference, [AudioOffsetAnalyzer]::Extract($samples))
     $ok = [Math]::Abs($analysis.OffsetMs - $want) -le $autoToleranceMs -and $analysis.Level -ne '低'
     Add-Result '自動調整' $file.Name $ok ('推定 {0} ms（{1} ms のはず）、信頼度 {2}' -f $analysis.OffsetMs, $want, $analysis.Level)
+}
+
+# ---- 4. ボーカル分離: 44.1 kHz float の WAV に変換し、ステムとの差分を .m4a に書く（GUI の関数そのもの） ----
+
+# ステムには元音源そのものを使う。MixGain × 元音源 + StemGain × ステム なので、オフボーカル（1 と −1）は無音、
+# リデュース −8 dB は元の 10^(−8/20) ≈ 0.40 倍になるはず（AAC とリミッターのぶんの誤差を見込む）
+$separationDir = Join-Path $workDir '分離 作業'
+New-Item -ItemType Directory -Path $separationDir -Force | Out-Null
+$mixWav = Join-Path $separationDir 'mix.wav'
+$separationLog = Join-Path $separationDir 'ffmpeg-error.log'
+$mixPeak = 0.0
+try {
+    ConvertTo-SeparationWav -FfmpegPath $FfmpegPath -SourceFile $videoPath -OutputPath $mixWav -LogPath $separationLog -State $null
+    $info = (Invoke-TestFfmpeg -Arguments @('-hide_banner', '-nostdin', '-i', $mixWav)).Error
+    $audioLine = (($info -split "`r?`n") | Where-Object { $_ -match 'Audio:' } | Select-Object -First 1)
+    $mixSamples = [AudioOffsetAnalyzer]::Decode($FfmpegPath, $mixWav)
+    foreach ($sample in $mixSamples) { $mixPeak = [Math]::Max($mixPeak, [Math]::Abs($sample)) }
+    $ok = ($audioLine -match 'pcm_f32le') -and ($audioLine -match '44100 Hz') -and ($audioLine -match 'stereo') -and $mixPeak -gt 0.05
+    Add-Result 'ボーカル分離' '変換（pcm_f32le、44100 Hz、ステレオの WAV）' $ok ('{0} / ピーク {1:0.000}' -f $audioLine.Trim(), $mixPeak)
+}
+catch {
+    Add-Result 'ボーカル分離' '変換（pcm_f32le、44100 Hz、ステレオの WAV）' $false $_.Exception.GetBaseException().Message
+}
+
+if ($mixPeak -gt 0.05) {
+    $reduceGains = Get-SeparationReduceGains -Db 8
+    $derived = @(
+        @{ Name = 'オフボーカル（元音源 − ステム）'; File = 'オフボーカル.m4a'; MixGain = 1.0; StemGain = -1.0; Ratio = 0.0; Tolerance = 0.03 },
+        @{ Name = 'リデュース −8 dB'; File = 'リデュース.m4a'; MixGain = [double]$reduceGains[0]; StemGain = [double]$reduceGains[1]; Ratio = [Math]::Pow(10.0, -8.0 / 20.0); Tolerance = 0.08 }
+    )
+    foreach ($case in $derived) {
+        $outputPath = Join-Path $separationDir $case.File
+        try {
+            New-SeparationDerivedTrack -FfmpegPath $FfmpegPath -MixWav $mixWav -StemWav $mixWav -MixGain $case.MixGain -StemGain $case.StemGain -OutputPath $outputPath -Bitrate '256k' -LogPath $separationLog -State $null
+            $streams = @(Get-StreamInfo $outputPath | Where-Object { $_.Type -eq 'Audio' })
+            $samples = [AudioOffsetAnalyzer]::Decode($FfmpegPath, $outputPath)
+            $peak = 0.0
+            foreach ($sample in $samples) { $peak = [Math]::Max($peak, [Math]::Abs($sample)) }
+            $ratio = $peak / $mixPeak
+            $ok = $streams.Count -eq 1 -and $streams[0].Codec -eq 'aac' -and [Math]::Abs($ratio - $case.Ratio) -le $case.Tolerance
+            Add-Result 'ボーカル分離' $case.Name $ok ('{0}、ピーク比 {1:0.000}（{2:0.000} のはず）' -f (($streams | ForEach-Object { $_.Codec }) -join ', '), $ratio, $case.Ratio)
+        }
+        catch {
+            Add-Result 'ボーカル分離' $case.Name $false $_.Exception.GetBaseException().Message
+        }
+    }
+
+    $stemPath = Join-Path $separationDir 'ボーカルのみ.m4a'
+    try {
+        Export-SeparationStem -FfmpegPath $FfmpegPath -StemWav $mixWav -OutputPath $stemPath -Bitrate '256k' -LogPath $separationLog -State $null
+        $streams = @(Get-StreamInfo $stemPath | Where-Object { $_.Type -eq 'Audio' })
+        $samples = [AudioOffsetAnalyzer]::Decode($FfmpegPath, $stemPath)
+        $peak = 0.0
+        foreach ($sample in $samples) { $peak = [Math]::Max($peak, [Math]::Abs($sample)) }
+        $ratio = $peak / $mixPeak
+        $ok = $streams.Count -eq 1 -and $streams[0].Codec -eq 'aac' -and $ratio -ge 0.85 -and $ratio -le 1.05
+        Add-Result 'ボーカル分離' 'ステムの書き出し（alimiter）' $ok ('{0}、ピーク比 {1:0.000}' -f (($streams | ForEach-Object { $_.Codec }) -join ', '), $ratio)
+    }
+    catch {
+        Add-Result 'ボーカル分離' 'ステムの書き出し（alimiter）' $false $_.Exception.GetBaseException().Message
+    }
 }
 
 # ---- 結果 ----
