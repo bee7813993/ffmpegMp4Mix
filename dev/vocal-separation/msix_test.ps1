@@ -3,7 +3,8 @@
 #   B: 標準モデルを退避した状態で実行し、エンジンのダウンロード確認が出ないこと、モデルの初回ダウンロードがどこに落ちるか
 #      （実フォルダーか LocalCache か）、分離が動くこと、「モデルフォルダーを開く」がその場所を開くこと、
 #      そこに置いた GGUF（と同名 .json）が一覧に出ることを見る
-# 事前に dev\build_msix.ps1 -Register -DevIdentity で登録しておく。
+# 事前に dev\build_msix.ps1 -Register -DevIdentity で登録しておく（-PackageName の既定は PitaTrack.Dev）。
+# Store から入れた版は -PackageName YFRTeam.36059D6F4B72A を付ける（SAC の仮想マシンの中で実行してもよい）。
 # MSIX パッケージの中で動くシェル（AI アシスタントのツールなど）から実行すると、%LOCALAPPDATA% がそのパッケージの仮想化で
 # 合成ビューに見えて実フォルダーを変えられないので、実フォルダーの確認と操作は WMI（CIM_DataFile、Win32_Process.Create で起動した
 # パッケージ外の PowerShell）に任せる（Get-OutsideFiles、Invoke-OutsidePackage）。
@@ -45,12 +46,15 @@ $pfn = $package.PackageFamilyName
 $installLocation = $package.InstallLocation
 $localCacheModels = Join-Path $env:LOCALAPPDATA ('Packages\' + $pfn + '\LocalCache\Local\PitaTrack\models')
 $realModels = Join-Path $env:LOCALAPPDATA 'PitaTrack\models'
-$realModelsWmiPath = '\\Users\\' + $env:USERNAME + '\\AppData\\Local\\PitaTrack\\models\\'
+$realModelsWmiPath = ($realModels.Substring(2) -replace '\\', '\\') + '\\'
 $localCacheWmiPath = ($localCacheModels.Substring(2) -replace '\\', '\\') + '\\'
 $standardFiles = @('kim_mel_vocals-Q8_0.gguf', 'kim_mel_vocals-Q8_0.LICENSE.txt', 'karaoke_anvuew-Q8_0.gguf', 'karaoke_anvuew-Q8_0.LICENSE.txt')
 $backupDir = Join-Path $env:LOCALAPPDATA 'Temp\pitatrack_msix_test_backup'
 Note ('package: ' + $package.PackageFullName + ' @ ' + $installLocation)
-Note ('ffmpeg in package: ' + ((& (Join-Path $installLocation 'tools\ffmpeg.exe') -version 2>&1 | Select-Object -First 1)))
+# Store から入れたパッケージの exe は、パッケージの外から直接は起動できない（アクセス拒否）。そのときは BUILD.txt から版を読む
+try { $ffmpegLine = [string](& (Join-Path $installLocation 'tools\ffmpeg.exe') -version 2>&1 | Select-Object -First 1) }
+catch { $ffmpegLine = '(not runnable from outside the package) ' + [string](Get-Content -LiteralPath (Join-Path $installLocation 'licenses\FFmpeg\BUILD.txt') -TotalCount 1 -ErrorAction SilentlyContinue) }
+Note ('ffmpeg in package: ' + $ffmpegLine)
 Note ('engine in package: ' + (Test-Path -LiteralPath (Join-Path $installLocation 'tools\bsroformer\bs_roformer-cli.exe')) + ' (' + ((Get-ChildItem -LiteralPath (Join-Path $installLocation 'tools\bsroformer') -File | ForEach-Object { $_.Name }) -join ', ') + ')')
 Note ('license files in package: ' + ((Get-ChildItem -LiteralPath (Join-Path $installLocation 'licenses') -Recurse -File | ForEach-Object { $_.FullName.Substring($installLocation.Length + 1) }) -join ', '))
 
@@ -66,10 +70,16 @@ function Invoke-OutsidePackage {
 # パッケージ外から見たフォルダーの中身（WMI。実行側のシェルの仮想化に惑わされない）
 function Get-OutsideFiles {
     param([string]$WmiPath)
-    @(Get-CimInstance CIM_DataFile -Filter ("Drive='C:' AND Path='" + $WmiPath + "'") | ForEach-Object { $_.FileName + '.' + $_.Extension + ' (' + $_.FileSize + ')' })
+    @(Get-CimInstance CIM_DataFile -Filter ("Drive='" + $env:LOCALAPPDATA.Substring(0, 2) + "' AND Path='" + $WmiPath + "'") | ForEach-Object { $_.FileName + '.' + $_.Extension + ' (' + $_.FileSize + ')' })
 }
 Note ('real models folder (outside): ' + ((Get-OutsideFiles $realModelsWmiPath) -join ', '))
 Note ('LocalCache models folder (outside): ' + ((Get-OutsideFiles $localCacheWmiPath) -join ', '))
+
+# プロセスのパッケージ名（tasklist /apps の最後の列。列名は Windows の言語で変わるので位置で読む）
+function Get-PackageNameOfProcess {
+    param([int]$ProcessId)
+    @(tasklist /apps /fi ("PID eq " + $ProcessId) /fo csv | ConvertFrom-Csv | ForEach-Object { @($_.PSObject.Properties)[-1].Value })
+}
 
 # ---- UIA の道具 ----
 function Find-Window {
@@ -226,7 +236,7 @@ function Start-Gui {
     }
     if ($guiPid -eq 0) { throw 'gui powershell not found' }
     $main = Find-Window -Name 'ぴたトラック' -Timeout 90 -ProcessId $guiPid
-    $apps = @(tasklist /apps /fi ("PID eq " + $guiPid) /fo csv | ConvertFrom-Csv | ForEach-Object { $_.'Package Name' })
+    $apps = @(Get-PackageNameOfProcess $guiPid)
     Note ($Prefix + ' gui pid ' + $guiPid + ' / package identity: ' + ($apps -join ', '))
     Start-Sleep -Seconds 2
     Save-Shot -Window $main -Name ($Prefix + '_main')
@@ -348,7 +358,7 @@ try {
                     $mods = @($cli[0].Modules | Where-Object { $_.ModuleName -match '^(vcruntime140|msvcp140|vcomp140|ggml|vulkan-1)' } | ForEach-Object { $_.ModuleName + ' <- ' + $_.FileName })
                     if ($mods.Count -gt 0) {
                         $modulesSeen = $true
-                        $apps = @(tasklist /apps /fi ("PID eq " + $cli[0].Id) /fo csv | ConvertFrom-Csv | ForEach-Object { $_.'Package Name' })
+                        $apps = @(Get-PackageNameOfProcess $cli[0].Id)
                         Note ('bs_roformer-cli.exe: ' + $cli[0].Path + ' / package identity: ' + ($apps -join ', '))
                         foreach ($m in $mods) { Note ('  module: ' + $m) }
                     }
