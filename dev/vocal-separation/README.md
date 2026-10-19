@@ -43,3 +43,4 @@ BSRoformer.cpp は `bs_roformer-cli.exe model.gguf in.wav out.wav [--overlap N]`
 | `mpc_test.ps1 -VideoFile <mp4> -ShotDir <保存先>` | MPC-BE で開き、A キーで音声トラックを切り替えながら画面を保存する |
 | `download_test.ps1 [-Keys kim,anvuew]` | 標準モデルをフォルダーから一時的に外し、GitHub Releases からのダウンロード・SHA256 照合・ライセンス文の配置を確かめる |
 | `msix_test.ps1 -VideoFile <動画> -ShotDir <保存先> [-Karaoke] [-SkipSeparation]` | Store 版（`dev\build_msix.ps1 -Register -DevIdentity` で登録した PitaTrack.Dev）を AppExecutionAlias から起動して UI Automation で一周する。A: 設定 → ライセンスの本文、モデルの一覧、「モデルフォルダーを開く」が開くフォルダー。B: 標準モデルを WMI 経由で退避して初回ダウンロード→分離→プレビュー→閉じる、置いた GGUF（と同名 .json）が一覧に出るか、ダウンロードが実フォルダーと LocalCache のどちらに落ちたか。`-SkipSeparation` で A だけ |
+| `zip_test.ps1 -GuiScript <tools\mixtrack_ffmpeg_gui.ps1> -VideoFile <動画> -ShotDir <保存先>` | ZIP 版の流れ。`toolsfmpeg.exe` も `toolssroformer` もない状態で GUI を開き、setup.ps1 のダウンロード画面で Release の ffmpeg を取得 → 分離エンジンの初回ダウンロード → 分離 まで通す（出力を作らないよう、動画はコピーを渡す） |

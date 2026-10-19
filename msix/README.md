@@ -23,7 +23,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File dev\build_msix.ps1
 
 `dist\PitaTrack_<版>_x64.msix` ができます（署名なし。Store に出すと Microsoft が署名します）。
 
-ffmpeg は、`dev\ffmpeg-lgpl` でビルドした LGPL 版の GitHub Release（今は `ffmpeg-9.0.2-pitatrack1`）からダウンロードし、`build_msix.ps1` に書いた SHA256 と照らし合わせます。ダウンロードしたものは `dist\ffmpeg-cache` に残すので、2 回目からはダウンロードしません。ffmpeg の版を上げるときは、新しい Release を作ってから、`build_msix.ps1` の `$ffmpegVersion`、`$ffmpegRelease`、`$ffmpegFiles` を変えます。ボーカル分離には wav・ipod のマルチプレクサーと amerge・pan・alimiter のフィルターが要り、これらは `ffmpeg-9.0.2-pitatrack2`（`dev\ffmpeg-lgpl\configure-options.txt`）から入ります。pitatrack1 の ffmpeg では、分離の最初の変換で「出力フォーマットを選べない」と失敗します。Release を作る前に手元でビルドした ffmpeg で試すときは、`build.sh` の出力フォルダーを `-FfmpegDir` に渡します（試験用。`licenses\README.txt` の版と URL は Release のもののまま）。
+ffmpeg は、`dev\ffmpeg-lgpl` でビルドした LGPL 版の GitHub Release（今は `ffmpeg-9.0.2-pitatrack2`）からダウンロードし、`build_msix.ps1` に書いた SHA256 と照らし合わせます。ダウンロードしたものは `dist\ffmpeg-cache` に残すので、2 回目からはダウンロードしません。ffmpeg の版を上げるときは、新しい Release を作ってから、`build_msix.ps1` の `$ffmpegVersion`、`$ffmpegRelease`、`$ffmpegFiles` を変えます。ボーカル分離には wav・ipod のマルチプレクサーと amerge・pan・alimiter のフィルターが要り、これらは `ffmpeg-9.0.2-pitatrack2`（`dev\ffmpeg-lgpl\configure-options.txt`）から入ります。pitatrack1 の ffmpeg では、分離の最初の変換で「出力フォーマットを選べない」と失敗します。Release を作る前に手元でビルドした ffmpeg で試すときは、`build.sh` の出力フォルダーを `-FfmpegDir` に渡します（試験用。`licenses\README.txt` の版と URL は Release のもののまま）。
 
 ボーカル分離のエンジン BSRoformer.cpp（Windows Vulkan 版の zip、約 22 MB）も同じように、`tools\mixtrack_ffmpeg_gui.ps1` の `$Script:BsRoformerUrl` と `$Script:BsRoformerSha256`（ZIP 版が初めて使うときにダウンロードするものと同じ）を読んでダウンロードし、SHA256 と照らし合わせて exe と dll を `tools\bsroformer` に入れます。zip にライセンス文は入っていないので、BSRoformer.cpp と ggml の MIT License も取得して `licenses\BSRoformer.cpp` に入れます。ダウンロードしたものは `dist\bsroformer-cache` に残します。エンジンの版を上げるときは GUI 側の URL と SHA256 を変え、LICENSE が変わっていれば `build_msix.ps1` の `$bsroformerLicenseFiles` の SHA256 も変えます。パッケージは約 36 MB です（ffmpeg だけのときは約 14 MB）。
 
@@ -44,7 +44,6 @@ ffmpeg は、`dev\ffmpeg-lgpl` でビルドした LGPL 版の GitHub Release（�
 提出の手順と、各欄に書く内容の案は [store-submission.md](store-submission.md) にまとめています。
 
 - Store の掲載情報の「追加のライセンス条項」と説明文に、FFmpeg を LGPLv2.1 で使っていることとソースの場所を書く（文案は `dev\ffmpeg-lgpl\license-notice.md` の 2 と 3）。ボーカル分離を入れた版からは、BSRoformer.cpp / ggml（MIT）とモデル（初回ダウンロード）の記載も足す（文案は `store-submission.md`）。
-- `ffmpeg-9.0.2-pitatrack2` の Release を作り（タグを push）、`build_msix.ps1` の `$ffmpegRelease` と `$ffmpegFiles`、`tools\setup.ps1` の `$Script:FfmpegUrl` と `$Script:FfmpegSha256`、「追加のライセンス条項」「認定の注記」と README の URL を更新する。それまでは、Store 版も ZIP 版（setup がダウンロードする ffmpeg）もボーカル分離の変換が失敗する。
 - Store から入れた版（非公開の対象ユーザー）で、モデルと設定が実フォルダーと `LocalCache` のどちらに書かれるか、「モデルフォルダーを開く」が同じ場所を開くかを確かめる。
 - GitHub Actions でパッケージを作る。
 - SAC がオンの PC（Hyper-V の仮想マシン）で、Store が署名した版を確かめる。

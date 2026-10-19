@@ -54,10 +54,10 @@ elseif ($Register) {
 # 版を上げるときは、新しい Release の SHA256SUMS.txt の値で下を一緒に変えます
 # （ZIP 版は tools\setup.ps1 の $Script:FfmpegUrl と $Script:FfmpegSha256）。
 $ffmpegVersion = '9.0.2'
-$ffmpegRelease = 'ffmpeg-9.0.2-pitatrack1'
+$ffmpegRelease = 'ffmpeg-9.0.2-pitatrack2'
 $ffmpegFiles = [ordered]@{
-    'ffmpeg-9.0.2-pitatrack1-lgpl-win64.zip'  = '34e93b6949d16ac109b15abf93826fc5f4af6fdf51a8d469a16eadec49d90eae'
-    'ffmpeg-9.0.2-pitatrack1-build-files.zip' = '3aa32fcac067acffbd7170b09148086b20b59fe796cab4225bcd11b9b643c5c3'
+    'ffmpeg-9.0.2-pitatrack2-lgpl-win64.zip'  = 'abcf7a24f697fb1886e52cdf382700493390a70e6b68b1abcc0f39c3ce03b2ad'
+    'ffmpeg-9.0.2-pitatrack2-build-files.zip' = '9f391e9aaf02076892e696f9d0f9d1a8b6126a94d735433ae03be94e850ca356'
     'ffmpeg-9.0.2.tar.xz'                     = '8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e'
     'ffmpeg-9.0.2.tar.xz.asc'                 = 'd617fd94ea354dadd2a8bb16243d37c44e1e9729b06b6ad58fe30bfb0fa943f2'
 }

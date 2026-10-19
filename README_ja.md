@@ -553,7 +553,7 @@ MPC-BE 1.5で重複表示される場合は、`MPCBE15_COMPAT_MODE=1` を試し�
 
 ぴたトラックは、以前は ffmpegMp4Mix という名前でした。
 
-セットアップやダウンロード画面で取得する ffmpeg は、FFmpeg 9.0.2 の公式のソースから、ぴたトラックが使う部品だけを LGPL でビルドしたものです（[ffmpeg-9.0.2-pitatrack1](https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack1)）。このソフトウェアは LGPLv2.1 でライセンスされた FFmpeg のコードを使っています。ソースは同じ Release からダウンロードできます。ダウンロードした zip は SHA256 で内容を確認してから、`ffmpeg.exe` と、ライセンスのファイル（`tools\ffmpeg-licenses`）を取り出します。
+セットアップやダウンロード画面で取得する ffmpeg は、FFmpeg 9.0.2 の公式のソースから、ぴたトラックが使う部品だけを LGPL でビルドしたものです（[ffmpeg-9.0.2-pitatrack2](https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack2)）。このソフトウェアは LGPLv2.1 でライセンスされた FFmpeg のコードを使っています。ソースは同じ Release からダウンロードできます。ダウンロードした zip は SHA256 で内容を確認してから、`ffmpeg.exe` と、ライセンスのファイル（`tools\ffmpeg-licenses`）を取り出します。
 
 Store版には、同じ ffmpeg と、そのライセンスとソースが入っています（アプリの **設定 → ライセンス** で見られます）。
 

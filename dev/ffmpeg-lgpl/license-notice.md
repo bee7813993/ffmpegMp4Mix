@@ -2,7 +2,7 @@
 
 Store 版（MSIX）のぴたトラックは、FFmpeg 9.0.2 を LGPL の部品だけでビルドした `ffmpeg.exe`（このフォルダーの `build.sh` で作る）を同梱し、別のプログラムとして呼び出します。ここには、そのために入れるライセンス表示の文案と、FFmpeg 公式の [License Compliance Checklist](https://ffmpeg.org/legal.html) への対応をまとめます。
 
-- ソースの置き場所は、GitHub Release の `https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack1` とします（[README.md](README.md) の「GitHub Release に置く」で作る）。FFmpeg の版や `PITATRACK_BUILD` を上げたら、下の文案の版と URL も変えます。
+- ソースの置き場所は、GitHub Release の `https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack2` とします（[README.md](README.md) の「GitHub Release に置く」で作る）。FFmpeg の版や `PITATRACK_BUILD` を上げたら、下の文案の版と URL も変えます。
 - 公開されている資料をもとにした整理で、法律の助言ではありません。
 
 ## 1. アプリの「ライセンス」画面（About）
@@ -16,7 +16,7 @@ This software uses libraries from the FFmpeg project under the LGPLv2.1.
 同梱の ffmpeg.exe は FFmpeg 9.0.2（https://ffmpeg.org/）を、公式のソースから手を加えずに、
 LGPL の部品だけでビルドしたものです。
   ライセンス: GNU Lesser General Public License version 2.1 以降（licenses\FFmpeg\LICENSE.txt）
-  ソースとビルドの指定: https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack1
+  ソースとビルドの指定: https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack2
 ぴたトラックの作者は FFmpeg の著作権を持っていません。FFmpeg の著作権は、その作者たちにあります。
 FFmpeg is a trademark of Fabrice Bellard, originator of the FFmpeg project.
 ぴたトラックは FFmpeg プロジェクトとは関係ありません。
@@ -33,7 +33,7 @@ FFmpeg is a trademark of Fabrice Bellard, originator of the FFmpeg project.
 
 このアプリには FFmpeg プロジェクト（https://ffmpeg.org/）の ffmpeg.exe が入っています。
 このソフトウェアは LGPLv2.1 でライセンスされた FFmpeg のコードを使っています。ソースはこちらからダウンロードできます:
-https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack1
+https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack2
 FFmpeg は GNU Lesser General Public License version 2.1 以降のライセンスで配布されています。
 ぴたトラックの提供者は FFmpeg の著作権を持っていません。FFmpeg の著作権はその作者たちにあります（https://ffmpeg.org/ とソースを参照）。
 この条項は、LGPL が利用者に認める権利（FFmpeg を改変すること、その改変のデバッグのためにリバースエンジニアリングすることを含む）を制限しません。
@@ -43,7 +43,7 @@ PitaTrack is provided under the Apache License 2.0 (https://github.com/bee781399
 
 This app includes ffmpeg.exe from the FFmpeg project (https://ffmpeg.org/).
 This software uses code of FFmpeg licensed under the LGPLv2.1 and its source can be downloaded here:
-https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack1
+https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack2
 FFmpeg is licensed under the GNU Lesser General Public License version 2.1 or later.
 The provider of PitaTrack does not own FFmpeg. FFmpeg is copyrighted by its authors (see https://ffmpeg.org/ and the source).
 Nothing in these terms restricts the rights the LGPL gives you, including the right to modify FFmpeg and to reverse engineer for debugging such modifications.
@@ -57,22 +57,22 @@ Store の既定の利用規約（Standard Application License Terms）は、複�
 チェックリストの 9 番（アプリのダウンロードへのリンクがあるページすべてに、FFmpeg を LGPLv2.1 で使っていることとソースの場所を書く）に当たります。
 
 ```text
-このソフトウェアは LGPLv2.1 でライセンスされた FFmpeg のコードを使っています。ソースはこちらからダウンロードできます: https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack1
-This software uses code of FFmpeg licensed under the LGPLv2.1 and its source can be downloaded here: https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack1
+このソフトウェアは LGPLv2.1 でライセンスされた FFmpeg のコードを使っています。ソースはこちらからダウンロードできます: https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack2
+This software uses code of FFmpeg licensed under the LGPLv2.1 and its source can be downloaded here: https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack2
 ```
 
 ## 4. パッケージに入れるファイル
 
 | パッケージの中 | 元 |
 |---|---|
-| `tools\ffmpeg.exe` | Release の `ffmpeg-9.0.2-pitatrack1-lgpl-win64.zip` の `ffmpeg.exe` |
+| `tools\ffmpeg.exe` | Release の `ffmpeg-9.0.2-pitatrack2-lgpl-win64.zip` の `ffmpeg.exe` |
 | `licenses\FFmpeg\LICENSE.txt` | 同じ artifact の `LICENSE.txt`（LGPL 2.1 の全文） |
 | `licenses\FFmpeg\FFmpeg-LICENSE.md` | 同じ artifact の `FFmpeg-LICENSE.md` |
 | `licenses\FFmpeg\README.txt` | 同じ artifact の `README.txt`（ソースの場所） |
 | `licenses\FFmpeg\BUILD.txt` | 同じ artifact の `BUILD.txt`（configure の指定とビルド環境） |
 | `licenses\FFmpeg\mingw-w64-runtime-copyright.txt` | 同じ artifact の `mingw-w64-runtime-copyright.txt`（静的にリンクした mingw-w64 のランタイム） |
 | `licenses\PitaTrack\LICENSE` | リポジトリの `LICENSE`（Apache 2.0） |
-| `licenses\FFmpeg\source\` | Release の `ffmpeg-9.0.2.tar.xz`、`ffmpeg-9.0.2.tar.xz.asc`、`ffmpeg-9.0.2-pitatrack1-build-files.zip`（下の案 A） |
+| `licenses\FFmpeg\source\` | Release の `ffmpeg-9.0.2.tar.xz`、`ffmpeg-9.0.2.tar.xz.asc`、`ffmpeg-9.0.2-pitatrack2-build-files.zip`（下の案 A） |
 | `licenses\README.txt` | `msix\licenses-README.txt`（1 の文面。アプリの「設定 → ライセンス」で表示する） |
 
 `dev\build_msix.ps1` が、Release からこれらをダウンロードし、スクリプトに書いた SHA256 と照らし合わせてから入れます。zip の中の `SHA256SUMS.txt` と `configure-options.txt` も `licenses\FFmpeg\` に入ります。
@@ -81,7 +81,7 @@ This software uses code of FFmpeg licensed under the LGPLv2.1 and its source can
 
 LGPL 2.1 の第 4 節は、FFmpeg を実行形式で配るとき、対応するソースを「一緒に付ける」か、実行形式と「同じ場所」からソースを取れるようにすることを求めています。FFmpeg のチェックリストの 8 番も、ソースを実行形式と同じサーバーに置くよう勧めています。Store 版の実行形式は Microsoft のサーバーから配られるので、GitHub Release のソースは厳密には「同じ場所」ではありません。
 
-- **案 A（いちばん確実）**: `ffmpeg-9.0.2.tar.xz`（約 12 MB）と `ffmpeg-9.0.2-pitatrack1-build-files.zip` をパッケージの `licenses\FFmpeg\source\` にも入れる。パッケージは約 12 MB 大きくなる（ffmpeg.exe は約 3.9 MB）。ソースは必ず実行形式と一緒に届く。
+- **案 A（いちばん確実）**: `ffmpeg-9.0.2.tar.xz`（約 12 MB）と `ffmpeg-9.0.2-pitatrack2-build-files.zip` をパッケージの `licenses\FFmpeg\source\` にも入れる。パッケージは約 12 MB 大きくなる（ffmpeg.exe は約 3.9 MB）。ソースは必ず実行形式と一緒に届く。
 - **案 B**: パッケージには入れず、GitHub Release に置いてライセンス画面と Store の掲載情報から案内する。多くのアプリがこの形をとっているが、上の「同じ場所」の条件を文字どおりには満たさない。
 
 どちらの場合も、GitHub Release にはソースを置き、表示の URL はそこを指します。

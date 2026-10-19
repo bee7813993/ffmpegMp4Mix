@@ -553,7 +553,7 @@ This tool is intended for users who previously used tools such as `L-SMASH Muxer
 
 PitaTrack was formerly called ffmpegMp4Mix.
 
-The ffmpeg downloaded by setup and the download window is built from the official FFmpeg 9.0.2 source with only the components PitaTrack uses, under the LGPL ([ffmpeg-9.0.2-pitatrack1](https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack1)). This software uses code of FFmpeg licensed under the LGPLv2.1 and its source can be downloaded from the same release. The downloaded zip is checked with SHA256, and then `ffmpeg.exe` and the license files (`tools\ffmpeg-licenses`) are extracted.
+The ffmpeg downloaded by setup and the download window is built from the official FFmpeg 9.0.2 source with only the components PitaTrack uses, under the LGPL ([ffmpeg-9.0.2-pitatrack2](https://github.com/bee7813993/ffmpegMp4Mix/releases/tag/ffmpeg-9.0.2-pitatrack2)). This software uses code of FFmpeg licensed under the LGPLv2.1 and its source can be downloaded from the same release. The downloaded zip is checked with SHA256, and then `ffmpeg.exe` and the license files (`tools\ffmpeg-licenses`) are extracted.
 
 The Store version includes the same ffmpeg with its license files and source (see **設定 → ライセンス**, Settings → License, in the app).
 
